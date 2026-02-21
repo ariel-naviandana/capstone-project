@@ -1,0 +1,39 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+tmp/
+main.exe
+api
+worker
+
+# Go workspace & modules
+go.work
+vendor/
+
+# Test & coverage
+*.test
+*.out
+coverage.*
+
+# Environment
+.env
+.env.local
+.env.development
+.env.test
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs & temp
+*.log
+.DS_Store
+Thumbs.db
+
+# Air hot-reload
+.air/

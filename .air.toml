@@ -1,0 +1,20 @@
+# .air.toml
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/main.exe ./cmd/api/main.go"  # ← ini penting: tunjuk ke main.go kamu
+bin = "./tmp/main.exe"
+full_bin = "./tmp/main.exe"
+include_ext = ["go"]
+exclude_dir = ["tmp", "vendor", "pkg"]
+delay = 1000  # ms
+kill_delay = "1s"
+send_interrupt = true
+
+[log]
+main_only = false
+time = true
+
+[misc]
+clean_on_exit = true
