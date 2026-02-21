@@ -10,7 +10,5 @@ FROM alpine:latest
 WORKDIR /root/
 COPY --from=builder /app/api .
 COPY .env .
-COPY migrations ./migrations
-COPY seeders ./seeders
 EXPOSE 8000
 CMD ["./api"]

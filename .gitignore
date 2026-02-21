@@ -6,8 +6,8 @@
 *.dylib
 tmp/
 main.exe
-api
-worker
+# api
+# worker
 
 # Go workspace & modules
 go.work
