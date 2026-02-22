@@ -18,3 +18,7 @@ func (s *TransactionService) CreateTransaction(ctx context.Context, input *domai
 	// Bisa tambah business logic nanti (validate, dll)
 	return s.repo.Create(ctx, input)
 }
+
+func (s *TransactionService) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
+	return s.repo.GetByTxID(ctx, txID)
+}

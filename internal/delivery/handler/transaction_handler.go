@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/capstone-b4/capstone-go/internal/application"
 	"github.com/capstone-b4/capstone-go/internal/domain"
@@ -49,4 +50,25 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		"id":      txID,
 		"message": "Transaksi diterima dan akan diproses async (status pending)",
 	})
+}
+
+func (h *TransactionHandler) GetByTxID(c *gin.Context) {
+	txID := c.Param("id")
+	if txID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tx_id required"})
+		return
+	}
+
+	detail, err := h.service.GetByTxID(c.Request.Context(), txID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
+		} else {
+			log.Printf("Gagal get transaction %s: %v", txID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get transaction"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, detail)
 }

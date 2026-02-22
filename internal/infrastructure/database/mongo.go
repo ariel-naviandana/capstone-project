@@ -101,6 +101,6 @@ func LogToMongo(event domain.KafkaTransactionEvent, status string, details strin
 	if err != nil {
 		log.Printf("Gagal log ke Mongo: %v", err)
 	} else {
-		log.Printf("Logged to Mongo: tx_id=%d, status=%s", event.TxID, status)
+		log.Printf("Logged to Mongo: tx_id=%s, status=%s", event.TxID, status)
 	}
 }

@@ -33,3 +33,15 @@ type KafkaTransactionEvent struct {
 	Type        string  `json:"type"` // deposit, withdraw, transfer
 	Timestamp   string  `json:"timestamp"`
 }
+
+type TransactionDetail struct {
+	TxID        string    `json:"tx_id"`
+	ID          int64     `json:"id,omitempty"` // internal DB ID kalau perlu
+	UserID      int64     `json:"user_id"`
+	RecipientID int64     `json:"recipient_id,omitempty"`
+	Amount      float64   `json:"amount"`
+	Type        string    `json:"type"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}

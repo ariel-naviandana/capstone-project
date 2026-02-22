@@ -40,6 +40,7 @@ func main() {
 
 	// Transaction endpoints
 	r.POST("/transactions", txHandler.Create)
+	r.GET("/transactions/:id", txHandler.GetByTxID)
 
 	port := config.AppConfig.ServerPort
 	if port == "" {

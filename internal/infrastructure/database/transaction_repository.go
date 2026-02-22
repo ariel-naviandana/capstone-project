@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
+	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -53,4 +54,25 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 	}
 
 	return id, nil
+}
+
+func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
+	var detail domain.TransactionDetail
+	query := `
+		SELECT tx_id, id, user_id, recipient_id, amount, type, status, created_at, updated_at
+		FROM transactions
+		WHERE tx_id = $1
+	`
+	err := r.db.QueryRow(ctx, query, txID).Scan(
+		&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
+		&detail.Amount, &detail.Type, &detail.Status,
+		&detail.CreatedAt, &detail.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("transaction not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction: %w", err)
+	}
+	return &detail, nil
 }
