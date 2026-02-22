@@ -22,13 +22,14 @@ type Config struct {
 
 	MongoURI string `mapstructure:"MONGO_URI"`
 
-	// tambahkan lainnya sesuai kebutuhan
+	RedisAddr     string `mapstructure:"REDIS_ADDR"`
+	RedisPassword string `mapstructure:"REDIS_PASSWORD"`
+	RedisDB       int    `mapstructure:"REDIS_DB"`
 }
 
 var AppConfig Config
 
 func LoadConfig() {
-	// Load .env
 	if err := godotenv.Load(".env"); err != nil {
 		log.Printf("Warning: godotenv.Load failed: %v", err)
 	} else {
@@ -37,10 +38,8 @@ func LoadConfig() {
 
 	viper.AutomaticEnv()
 
-	// Set default values
 	viper.SetDefault("SERVER_PORT", "8000")
 
-	// Bind environment variables
 	viper.BindEnv("SERVER_PORT")
 	viper.BindEnv("POSTGRES_HOST")
 	viper.BindEnv("POSTGRES_PORT")
@@ -51,19 +50,21 @@ func LoadConfig() {
 	viper.BindEnv("KAFKA_TOPIC")
 	viper.BindEnv("KAFKA_GROUP_ID")
 	viper.BindEnv("MONGO_URI")
+	viper.BindEnv("REDIS_ADDR")
+	viper.BindEnv("REDIS_PASSWORD")
+	viper.BindEnv("REDIS_DB")
 
-	// Unmarshal ke struct
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		log.Fatalf("Unmarshal error: %v", err)
 	}
 
-	// Debug print
 	log.Printf("Loaded SERVER_PORT: [%s]", AppConfig.ServerPort)
 	log.Printf("Loaded POSTGRES_HOST: [%s]", AppConfig.PostgresHost)
 	log.Printf("Loaded POSTGRES_DB: [%s]", AppConfig.PostgresDBName)
 	log.Printf("Loaded KAFKA_BROKERS: %v", AppConfig.KafkaBrokers)
 	log.Printf("Loaded KAFKA_TOPIC: [%s]", AppConfig.KafkaTopic)
 	log.Printf("Loaded MONGO_URI: [%s]", AppConfig.MongoURI)
+	log.Printf("Loaded REDIS_ADDR: [%s]", AppConfig.RedisAddr)
 
 	log.Println("Config loaded successfully")
 }

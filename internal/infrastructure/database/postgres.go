@@ -21,7 +21,7 @@ func ConnectPostgres() {
 		config.AppConfig.PostgresDBName,
 	)
 
-	log.Printf("DSN yang dipakai: %s", dsn) // ← tambah ini untuk debug
+	log.Printf("DSN yang dipakai: %s", dsn)
 
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {

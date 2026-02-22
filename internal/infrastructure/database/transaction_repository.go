@@ -35,7 +35,6 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 		RETURNING id
 	`
 
-	// Kalau type bukan transfer, kirim 0 (boleh di DB sekarang)
 	recipientID := input.RecipientID
 	if input.Type != "transfer" {
 		recipientID = 0

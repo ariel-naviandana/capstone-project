@@ -15,7 +15,6 @@ func NewTransactionService(repo domain.TransactionRepository) *TransactionServic
 }
 
 func (s *TransactionService) CreateTransaction(ctx context.Context, input *domain.TransactionCreate) (int64, error) {
-	// Bisa tambah business logic nanti (validate, dll)
 	return s.repo.Create(ctx, input)
 }
 

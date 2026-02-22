@@ -7,6 +7,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/application"
 	"github.com/capstone-b4/capstone-go/internal/config"
 	"github.com/capstone-b4/capstone-go/internal/delivery/handler"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 
@@ -18,18 +19,18 @@ func main() {
 	database.ConnectPostgres()
 	defer database.ClosePostgres()
 
-	// Init Kafka producer
+	cache.ConnectRedis()
+	defer cache.CloseRedis()
+
 	queue.InitKafkaProducer()
 	defer queue.CloseKafkaProducer()
 
-	// Init repository & service
 	txRepo := database.NewTransactionRepository(database.PostgresPool)
 	txService := application.NewTransactionService(txRepo)
 	txHandler := handler.NewTransactionHandler(txService)
 
 	r := gin.Default()
 
-	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
@@ -38,9 +39,8 @@ func main() {
 		})
 	})
 
-	// Transaction endpoints
 	r.POST("/transactions", txHandler.Create)
-	r.GET("/transactions/:id", txHandler.GetByTxID)
+	r.GET("/transactions/:txId", txHandler.GetByTxID)
 	r.GET("/users/:id/balance", txHandler.GetUserBalance)
 
 	port := config.AppConfig.ServerPort

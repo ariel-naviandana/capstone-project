@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 )
@@ -17,11 +18,13 @@ func main() {
 	database.ConnectMongo()
 	defer database.CloseMongo()
 
-	// Start consumer
+	cache.ConnectRedis()
+	defer cache.CloseRedis()
+
 	go queue.StartKafkaConsumer()
 	defer queue.CloseKafkaConsumer()
 
 	log.Println("Worker running... Kafka consumer active")
 
-	select {} // keep alive
+	select {}
 }

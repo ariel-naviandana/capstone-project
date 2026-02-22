@@ -38,31 +38,28 @@ func ConnectMongo() {
 	MongoClient = client
 	TransactionLogCollection = client.Database("capstone").Collection("transaction_logs")
 
-	// Otomatis buat index saat connect
 	ensureIndexes()
 
 	log.Println("Connected to MongoDB & indexes ensured")
 }
 
-// Fungsi auto-create index (idempotent)
 func ensureIndexes() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Index untuk query cepat
 	indexes := []mongo.IndexModel{
 		{
 			Keys:    bson.D{{Key: "tx_id", Value: 1}},
-			Options: options.Index().SetUnique(true), // optional unique kalau tx_id unik
+			Options: options.Index().SetUnique(true),
 		},
 		{
-			Keys: bson.D{{Key: "timestamp", Value: -1}}, // recent first
+			Keys: bson.D{{Key: "timestamp", Value: -1}},
 		},
 		{
 			Keys: bson.D{{Key: "status", Value: 1}},
 		},
 		{
-			Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "timestamp", Value: -1}}, // compound untuk filter per user + recent
+			Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "timestamp", Value: -1}},
 		},
 	}
 
@@ -82,7 +79,6 @@ func CloseMongo() {
 	}
 }
 
-// Fungsi LogToMongo tetap sama seperti sebelumnya
 func LogToMongo(event domain.KafkaTransactionEvent, status string, details string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
