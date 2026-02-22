@@ -70,3 +70,33 @@ func SetCache(ctx context.Context, key string, value interface{}, ttl time.Durat
 	}
 	return err
 }
+
+func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) (int, error) {
+	pipe := RedisClient.Pipeline()
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, expiry)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return int(incr.Val()), nil
+}
+
+func GetRateLimitStatus(ctx context.Context, key string) (int, time.Duration, error) {
+	count, err := RedisClient.Get(ctx, key).Int()
+	if err == redis.Nil {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+
+	ttl, err := RedisClient.TTL(ctx, key).Result()
+	if err != nil {
+		return count, 0, err
+	}
+
+	return count, ttl, nil
+}

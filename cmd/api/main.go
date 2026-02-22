@@ -7,6 +7,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/application"
 	"github.com/capstone-b4/capstone-go/internal/config"
 	"github.com/capstone-b4/capstone-go/internal/delivery/handler"
+	"github.com/capstone-b4/capstone-go/internal/delivery/middleware"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
@@ -31,17 +32,17 @@ func main() {
 
 	r := gin.Default()
 
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"port":    config.AppConfig.ServerPort,
-			"message": "Capstone Go API is running",
-		})
-	})
+	apiGroup := r.Group("/")
+	apiGroup.Use(middleware.RateLimiter())
+	{
+		apiGroup.POST("/transactions", txHandler.Create)
+		apiGroup.GET("/transactions/:txId", txHandler.GetByTxID)
+		apiGroup.GET("/users/:id/balance", txHandler.GetUserBalance)
+	}
 
-	r.POST("/transactions", txHandler.Create)
-	r.GET("/transactions/:txId", txHandler.GetByTxID)
-	r.GET("/users/:id/balance", txHandler.GetUserBalance)
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	port := config.AppConfig.ServerPort
 	if port == "" {
