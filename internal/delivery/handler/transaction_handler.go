@@ -6,6 +6,7 @@ import (
 
 	"github.com/capstone-b4/capstone-go/internal/application"
 	"github.com/capstone-b4/capstone-go/internal/domain"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,20 +22,33 @@ func NewTransactionHandler(service *application.TransactionService) *Transaction
 func (h *TransactionHandler) Create(c *gin.Context) {
 	var input domain.TransactionCreate
 	if err := c.ShouldBindJSON(&input); err != nil {
-		log.Printf("Binding error: %v", err) // tambah log
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input", "detail": err.Error()})
 		return
 	}
 
-	id, err := h.service.CreateTransaction(c.Request.Context(), &input)
-	if err != nil {
-		log.Printf("Create transaction error: %v", err) // log detail error
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create transaction", "detail": err.Error()})
+	// Validasi tambahan: transfer wajib recipient_id
+	if input.Type == "transfer" && input.RecipientID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "recipient_id wajib untuk type transfer"})
 		return
+	}
+
+	// Insert ke DB (asumsi service return txID)
+	txID, err := h.service.CreateTransaction(c.Request.Context(), &input)
+	if err != nil {
+		log.Printf("Gagal create transaction: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membuat transaksi", "detail": err.Error()})
+		return
+	}
+
+	// Publish ke Kafka (non-blocking, tidak gagalkan response kalau Kafka down)
+	err = queue.PublishTransactionEvent(txID, input.UserID, input.RecipientID, input.Amount, input.Type)
+	if err != nil {
+		log.Printf("Kafka publish gagal (transaksi tetap dibuat): %v", err)
+		// Tidak return error ke client, biar API tetap responsif
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"id":      id,
-		"message": "Transaction created successfully (pending)",
+		"id":      txID,
+		"message": "Transaksi dibuat berhasil (pending, diproses async)",
 	})
 }

@@ -16,12 +16,11 @@ import (
 func main() {
 	config.LoadConfig()
 	database.ConnectPostgres()
+	defer database.ClosePostgres()
 
 	// Init Kafka producer
 	queue.InitKafkaProducer()
 	defer queue.CloseKafkaProducer()
-
-	defer database.ClosePostgres()
 
 	// Init repository & service
 	txRepo := database.NewTransactionRepository(database.PostgresPool)

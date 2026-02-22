@@ -16,6 +16,10 @@ type Config struct {
 	PostgresPassword string `mapstructure:"POSTGRES_PASSWORD"`
 	PostgresDBName   string `mapstructure:"POSTGRES_DB"`
 
+	KafkaBrokers []string `mapstructure:"KAFKA_BROKERS"`
+	KafkaTopic   string   `mapstructure:"KAFKA_TOPIC"`
+	KafkaGroupID string   `mapstructure:"KAFKA_GROUP_ID"`
+
 	// tambahkan lainnya sesuai kebutuhan
 }
 
@@ -41,6 +45,9 @@ func LoadConfig() {
 	viper.BindEnv("POSTGRES_USER")
 	viper.BindEnv("POSTGRES_PASSWORD")
 	viper.BindEnv("POSTGRES_DB")
+	viper.BindEnv("KAFKA_BROKERS")
+	viper.BindEnv("KAFKA_TOPIC")
+	viper.BindEnv("KAFKA_GROUP_ID")
 
 	// Unmarshal ke struct
 	if err := viper.Unmarshal(&AppConfig); err != nil {
@@ -51,6 +58,8 @@ func LoadConfig() {
 	log.Printf("Loaded SERVER_PORT: [%s]", AppConfig.ServerPort)
 	log.Printf("Loaded POSTGRES_HOST: [%s]", AppConfig.PostgresHost)
 	log.Printf("Loaded POSTGRES_DB: [%s]", AppConfig.PostgresDBName)
+	log.Printf("Loaded KAFKA_BROKERS: %v", AppConfig.KafkaBrokers)
+	log.Printf("Loaded KAFKA_TOPIC: [%s]", AppConfig.KafkaTopic)
 
 	log.Println("Config loaded successfully")
 }
