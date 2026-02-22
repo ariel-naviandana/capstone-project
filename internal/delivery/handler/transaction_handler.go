@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/capstone-b4/capstone-go/internal/application"
@@ -71,4 +72,26 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, detail)
+}
+
+func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
+	userIDStr := c.Param("id")
+	userID, err := strconv.ParseInt(userIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	balance, err := h.service.GetUserBalance(c.Request.Context(), userID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			log.Printf("Gagal get balance user %d: %v", userID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get balance"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, balance)
 }

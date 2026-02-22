@@ -76,3 +76,20 @@ func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*do
 	}
 	return &detail, nil
 }
+
+func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64) (*domain.UserBalance, error) {
+	var ub domain.UserBalance
+	query := `
+		SELECT id, username, balance
+		FROM users
+		WHERE id = $1
+	`
+	err := r.db.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user balance: %w", err)
+	}
+	return &ub, nil
+}

@@ -45,3 +45,9 @@ type TransactionDetail struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+type UserBalance struct {
+	ID       int64   `json:"id"`
+	Username string  `json:"username"`
+	Balance  float64 `json:"balance"`
+}

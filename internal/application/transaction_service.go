@@ -22,3 +22,7 @@ func (s *TransactionService) CreateTransaction(ctx context.Context, input *domai
 func (s *TransactionService) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
 	return s.repo.GetByTxID(ctx, txID)
 }
+
+func (s *TransactionService) GetUserBalance(ctx context.Context, userID int64) (*domain.UserBalance, error) {
+	return s.repo.GetUserBalance(ctx, userID)
+}
