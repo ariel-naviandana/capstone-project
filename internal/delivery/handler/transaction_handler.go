@@ -7,6 +7,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/application"
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,29 +27,26 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Validasi tambahan: transfer wajib recipient_id
+	// Validasi transfer
 	if input.Type == "transfer" && input.RecipientID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "recipient_id wajib untuk type transfer"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "recipient_id wajib untuk transfer"})
 		return
 	}
 
-	// Insert ke DB (asumsi service return txID)
-	txID, err := h.service.CreateTransaction(c.Request.Context(), &input)
+	// Generate tx_id UUID (unik tanpa DB)
+	txID := uuid.New().String()
+
+	// Publish ke Kafka dulu (fire-and-forget)
+	err := queue.PublishTransactionEvent(txID, input.UserID, input.RecipientID, input.Amount, input.Type)
 	if err != nil {
-		log.Printf("Gagal create transaction: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membuat transaksi", "detail": err.Error()})
+		log.Printf("Gagal publish Kafka: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Sistem sedang sibuk, coba lagi nanti"})
 		return
 	}
 
-	// Publish ke Kafka (non-blocking, tidak gagalkan response kalau Kafka down)
-	err = queue.PublishTransactionEvent(txID, input.UserID, input.RecipientID, input.Amount, input.Type)
-	if err != nil {
-		log.Printf("Kafka publish gagal (transaksi tetap dibuat): %v", err)
-		// Tidak return error ke client, biar API tetap responsif
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
+	// Return cepat ke user (Accepted 202 lebih tepat untuk async processing)
+	c.JSON(http.StatusAccepted, gin.H{
 		"id":      txID,
-		"message": "Transaksi dibuat berhasil (pending, diproses async)",
+		"message": "Transaksi diterima dan akan diproses async (status pending)",
 	})
 }

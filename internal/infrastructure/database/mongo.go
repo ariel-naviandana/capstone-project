@@ -19,22 +19,60 @@ func ConnectMongo() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	clientOptions := options.Client().ApplyURI(config.AppConfig.MongoURI) // tambah di config nanti
-	client, err := mongo.Connect(ctx, clientOptions)
-	if err != nil {
-		log.Fatal("Gagal connect Mongo: ", err)
+	uri := config.AppConfig.MongoURI
+	if uri == "" {
+		log.Fatal("MONGO_URI tidak ditemukan di config")
 	}
 
-	// Ping untuk test koneksi
+	clientOptions := options.Client().ApplyURI(uri)
+	client, err := mongo.Connect(ctx, clientOptions)
+	if err != nil {
+		log.Fatalf("Gagal connect Mongo: %v", err)
+	}
+
 	err = client.Ping(ctx, nil)
 	if err != nil {
-		log.Fatal("Mongo ping gagal: ", err)
+		log.Fatalf("Mongo ping gagal: %v", err)
 	}
 
 	MongoClient = client
 	TransactionLogCollection = client.Database("capstone").Collection("transaction_logs")
 
-	log.Println("Connected to MongoDB")
+	// Otomatis buat index saat connect
+	ensureIndexes()
+
+	log.Println("Connected to MongoDB & indexes ensured")
+}
+
+// Fungsi auto-create index (idempotent)
+func ensureIndexes() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Index untuk query cepat
+	indexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "tx_id", Value: 1}},
+			Options: options.Index().SetUnique(true), // optional unique kalau tx_id unik
+		},
+		{
+			Keys: bson.D{{Key: "timestamp", Value: -1}}, // recent first
+		},
+		{
+			Keys: bson.D{{Key: "status", Value: 1}},
+		},
+		{
+			Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "timestamp", Value: -1}}, // compound untuk filter per user + recent
+		},
+	}
+
+	_, err := TransactionLogCollection.Indexes().CreateMany(ctx, indexes)
+	if err != nil {
+		log.Printf("Gagal create index di Mongo: %v (lanjut tanpa index baru)", err)
+		return
+	}
+
+	log.Println("Mongo indexes berhasil dibuat/diperiksa (tx_id, timestamp, status, user_id)")
 }
 
 func CloseMongo() {
@@ -44,6 +82,7 @@ func CloseMongo() {
 	}
 }
 
+// Fungsi LogToMongo tetap sama seperti sebelumnya
 func LogToMongo(event domain.KafkaTransactionEvent, status string, details string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -61,5 +100,7 @@ func LogToMongo(event domain.KafkaTransactionEvent, status string, details strin
 	_, err := TransactionLogCollection.InsertOne(ctx, doc)
 	if err != nil {
 		log.Printf("Gagal log ke Mongo: %v", err)
+	} else {
+		log.Printf("Logged to Mongo: tx_id=%d, status=%s", event.TxID, status)
 	}
 }

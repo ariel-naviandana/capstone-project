@@ -26,7 +26,7 @@ type TransactionCreate struct {
 
 // KafkaTransactionEvent untuk message dari Kafka
 type KafkaTransactionEvent struct {
-	TxID        int64   `json:"tx_id"`
+	TxID        string  `json:"tx_id"`
 	UserID      int64   `json:"user_id"`
 	RecipientID int64   `json:"recipient_id"`
 	Amount      float64 `json:"amount"`

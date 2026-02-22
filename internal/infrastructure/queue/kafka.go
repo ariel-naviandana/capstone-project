@@ -34,23 +34,20 @@ func InitKafkaProducer() {
 	log.Printf("Kafka producer initialized dengan brokers: %v, topic: %s", brokers, config.AppConfig.KafkaTopic)
 }
 
-// Fungsi auto-create topic kalau belum ada (dipanggil sekali saat init)
 func createTopicIfNotExist(broker string, topic string) {
 	conn, err := kafka.Dial("tcp", broker)
 	if err != nil {
 		log.Printf("Gagal connect ke broker untuk check/create topic: %v", err)
-		return // tidak fatal, biar app tetap jalan
+		return
 	}
 	defer conn.Close()
 
-	// Cek apakah topic sudah ada
 	partitions, err := conn.ReadPartitions(topic)
 	if err == nil && len(partitions) > 0 {
 		log.Printf("Topic %s sudah ada", topic)
 		return
 	}
 
-	// Buat topic kalau belum ada
 	err = conn.CreateTopics(kafka.TopicConfig{
 		Topic:             topic,
 		NumPartitions:     3,
@@ -64,7 +61,7 @@ func createTopicIfNotExist(broker string, topic string) {
 	log.Printf("Topic %s berhasil dibuat otomatis", topic)
 }
 
-func PublishTransactionEvent(txID int64, userID int64, recipientID int64, amount float64, txType string) error {
+func PublishTransactionEvent(txID string, userID int64, recipientID int64, amount float64, txType string) error {
 	if kafkaWriter == nil {
 		return fmt.Errorf("kafka writer belum di-init")
 	}
@@ -85,7 +82,7 @@ func PublishTransactionEvent(txID int64, userID int64, recipientID int64, amount
 
 	err = kafkaWriter.WriteMessages(context.Background(),
 		kafka.Message{
-			Key:   []byte(fmt.Sprintf("%d", txID)),
+			Key:   []byte(txID),
 			Value: data,
 		},
 	)
@@ -93,7 +90,7 @@ func PublishTransactionEvent(txID int64, userID int64, recipientID int64, amount
 		return fmt.Errorf("gagal publish ke Kafka: %v", err)
 	}
 
-	log.Printf("Berhasil publish event transaksi ke Kafka: tx_id=%d, type=%s", txID, txType)
+	log.Printf("Berhasil publish event transaksi ke Kafka: tx_id=%s, type=%s", txID, txType)
 	return nil
 }
 
@@ -103,8 +100,6 @@ func CloseKafkaProducer() {
 		log.Println("Kafka producer ditutup")
 	}
 }
-
-// ... kode producer tetap
 
 var kafkaReader *kafka.Reader
 
@@ -128,7 +123,7 @@ func StartKafkaConsumer() {
 		msg, err := kafkaReader.ReadMessage(context.Background())
 		if err != nil {
 			log.Printf("Error read message: %v", err)
-			time.Sleep(1 * time.Second) // backoff
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
@@ -138,12 +133,10 @@ func StartKafkaConsumer() {
 			continue
 		}
 
-		log.Printf("Received event: tx_id=%d, type=%s", event.TxID, event.Type)
+		log.Printf("Received event: tx_id=%s, type=%s", event.TxID, event.Type)
 
-		// Proses real
 		processTransactionEvent(&event)
 
-		// Commit offset
 		kafkaReader.CommitMessages(context.Background(), msg)
 	}
 }
@@ -152,20 +145,30 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 1. Ambil transaction & user dari DB
-	var tx domain.Transaction
+	// 1. Cek apakah tx sudah diproses (idempotent)
+	var existingTxID string
 	err := database.PostgresPool.QueryRow(ctx,
-		"SELECT id, user_id, recipient_id, amount, type, status FROM transactions WHERE id = $1",
-		event.TxID).Scan(&tx.ID, &tx.UserID, &tx.RecipientID, &tx.Amount, &tx.Type, &tx.Status)
-	if err != nil {
-		log.Printf("Gagal ambil tx %d: %v", event.TxID, err)
-		database.LogToMongo(*event, "failed", "Transaction not found")
+		"SELECT tx_id FROM transactions WHERE tx_id = $1", event.TxID).Scan(&existingTxID)
+	if err == nil {
+		log.Printf("Tx %s sudah diproses sebelumnya, skip", event.TxID)
 		return
 	}
 
+	// 2. Insert transaction dengan status pending
+	_, err = database.PostgresPool.Exec(ctx,
+		`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())`,
+		event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type)
+	if err != nil {
+		log.Printf("Gagal insert tx pending %s: %v", event.TxID, err)
+		database.LogToMongo(*event, "failed", "Insert pending gagal")
+		return
+	}
+
+	// 3. Cek saldo user
 	var userBalance float64
 	err = database.PostgresPool.QueryRow(ctx,
-		"SELECT balance FROM users WHERE id = $1 FOR UPDATE", // lock row untuk atomic
+		"SELECT balance FROM users WHERE id = $1 FOR UPDATE",
 		event.UserID).Scan(&userBalance)
 	if err != nil {
 		log.Printf("Gagal ambil saldo user %d: %v", event.UserID, err)
@@ -173,6 +176,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 		return
 	}
 
+	// 4. Cek saldo recipient kalau transfer
 	var recipientBalance float64
 	if event.Type == "transfer" && event.RecipientID != 0 {
 		err = database.PostgresPool.QueryRow(ctx,
@@ -185,7 +189,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 		}
 	}
 
-	// 2. Proses berdasarkan type
+	// 5. Proses berdasarkan type
 	var newStatus string = "success"
 	var details string
 
@@ -218,7 +222,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 		details = "Type tidak dikenal"
 	}
 
-	// 3. Update DB atomic (dalam transaction)
+	// 6. Update DB atomic
 	txDB, err := database.PostgresPool.Begin(ctx)
 	if err != nil {
 		log.Printf("Gagal begin tx DB: %v", err)
@@ -243,7 +247,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 	}
 
 	// Update status transaction
-	_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE id = $2", newStatus, event.TxID)
+	_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2", newStatus, event.TxID)
 	if err != nil {
 		log.Printf("Gagal update status tx: %v", err)
 		return
@@ -254,10 +258,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 		return
 	}
 
-	// 4. Log ke Mongo
+	// 7. Log ke Mongo
 	database.LogToMongo(*event, newStatus, details)
 
-	log.Printf("Processed tx_id=%d: status=%s, details=%s", event.TxID, newStatus, details)
+	log.Printf("Processed tx_id=%s: status=%s, details=%s", event.TxID, newStatus, details)
 }
 
 func CloseKafkaConsumer() {
