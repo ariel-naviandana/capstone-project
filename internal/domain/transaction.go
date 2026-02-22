@@ -23,3 +23,13 @@ type TransactionCreate struct {
 	RecipientID int64   `json:"recipient_id,omitempty"`                                  // opsional, wajib kalau type=transfer
 	Description string  `json:"description,omitempty"`                                   // opsional
 }
+
+// KafkaTransactionEvent untuk message dari Kafka
+type KafkaTransactionEvent struct {
+	TxID        int64   `json:"tx_id"`
+	UserID      int64   `json:"user_id"`
+	RecipientID int64   `json:"recipient_id"`
+	Amount      float64 `json:"amount"`
+	Type        string  `json:"type"` // deposit, withdraw, transfer
+	Timestamp   string  `json:"timestamp"`
+}

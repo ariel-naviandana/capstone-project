@@ -2,19 +2,26 @@ package main
 
 import (
 	"log"
-	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 )
 
 func main() {
 	config.LoadConfig()
-	log.Println("Worker starting... Kafka consumer placeholder")
 
-	log.Println("Worker ready (heartbeat every 10 seconds)")
+	database.ConnectPostgres()
+	defer database.ClosePostgres()
 
-	for {
-		log.Println("Worker heartbeat - still alive at", time.Now().Format(time.RFC3339))
-		time.Sleep(10 * time.Second)
-	}
+	database.ConnectMongo()
+	defer database.CloseMongo()
+
+	// Start consumer
+	go queue.StartKafkaConsumer()
+	defer queue.CloseKafkaConsumer()
+
+	log.Println("Worker running... Kafka consumer active")
+
+	select {} // keep alive
 }

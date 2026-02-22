@@ -20,6 +20,8 @@ type Config struct {
 	KafkaTopic   string   `mapstructure:"KAFKA_TOPIC"`
 	KafkaGroupID string   `mapstructure:"KAFKA_GROUP_ID"`
 
+	MongoURI string `mapstructure:"MONGO_URI"`
+
 	// tambahkan lainnya sesuai kebutuhan
 }
 
@@ -48,6 +50,7 @@ func LoadConfig() {
 	viper.BindEnv("KAFKA_BROKERS")
 	viper.BindEnv("KAFKA_TOPIC")
 	viper.BindEnv("KAFKA_GROUP_ID")
+	viper.BindEnv("MONGO_URI")
 
 	// Unmarshal ke struct
 	if err := viper.Unmarshal(&AppConfig); err != nil {
@@ -60,6 +63,7 @@ func LoadConfig() {
 	log.Printf("Loaded POSTGRES_DB: [%s]", AppConfig.PostgresDBName)
 	log.Printf("Loaded KAFKA_BROKERS: %v", AppConfig.KafkaBrokers)
 	log.Printf("Loaded KAFKA_TOPIC: [%s]", AppConfig.KafkaTopic)
+	log.Printf("Loaded MONGO_URI: [%s]", AppConfig.MongoURI)
 
 	log.Println("Config loaded successfully")
 }
