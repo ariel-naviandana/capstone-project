@@ -10,6 +10,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/segmentio/kafka-go v0.4.50
+	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/viper v1.21.0
 	go.mongodb.org/mongo-driver v1.17.9
 )

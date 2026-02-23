@@ -11,6 +11,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
@@ -38,10 +39,20 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 
 	txID := uuid.New().String()
 
-	err := queue.PublishTransactionEvent(txID, input.UserID, input.RecipientID, input.Amount, input.Type)
+	_, err := resilience.ExecuteWithBreaker[struct{}](
+		c.Request.Context(),
+		resilience.KafkaProducerBreaker,
+		"KafkaPublish",
+		func() (struct{}, error) {
+			return struct{}{}, queue.PublishTransactionEvent(txID, input.UserID, input.RecipientID, input.Amount, input.Type)
+		},
+	)
 	if err != nil {
-		log.Printf("Gagal publish Kafka: %v", err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Sistem sibuk, coba lagi nanti"})
+		log.Printf("Kafka publish ditolak breaker: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "Sistem sedang overload atau Kafka tidak tersedia",
+			"message": "Coba lagi dalam beberapa detik",
+		})
 		return
 	}
 

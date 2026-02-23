@@ -11,6 +11,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -28,7 +29,7 @@ func InitKafkaProducer() {
 		Addr:     kafka.TCP(brokers...),
 		Topic:    config.AppConfig.KafkaTopic,
 		Balancer: &kafka.LeastBytes{},
-		Async:    true,
+		Async:    false,
 	}
 
 	log.Printf("Kafka producer initialized dengan brokers: %v, topic: %s", brokers, config.AppConfig.KafkaTopic)
@@ -87,7 +88,8 @@ func PublishTransactionEvent(txID string, userID int64, recipientID int64, amoun
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("gagal publish: %v", err)
+		log.Printf("Gagal publish ke Kafka: %v", err)
+		return fmt.Errorf("gagal publish ke Kafka: %w", err)
 	}
 
 	log.Printf("Berhasil publish: tx_id=%s, type=%s", txID, txType)
@@ -120,9 +122,16 @@ func StartKafkaConsumer() {
 	log.Printf("Kafka consumer started, group: transaction-worker-group, topic: %s", config.AppConfig.KafkaTopic)
 
 	for {
-		msg, err := kafkaReader.ReadMessage(context.Background())
+		msg, err := resilience.ExecuteWithBreaker[kafka.Message](
+			context.Background(),
+			resilience.KafkaConsumerBreaker,
+			"KafkaRead",
+			func() (kafka.Message, error) {
+				return kafkaReader.ReadMessage(context.Background())
+			},
+		)
 		if err != nil {
-			log.Printf("Error read message: %v", err)
+			log.Printf("Kafka read ditolak breaker: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
