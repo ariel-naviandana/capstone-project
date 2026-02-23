@@ -94,14 +94,11 @@ func LogToMongo(event domain.KafkaTransactionEvent, status string, details strin
 		"timestamp": time.Now().UTC(),
 	}
 
-	_, err := resilience.ExecuteWithBreaker[interface{}](
-		ctx,
-		resilience.MongoBreaker,
-		"MongoLogInsert",
-		func() (interface{}, error) {
-			return TransactionLogCollection.InsertOne(ctx, doc)
-		},
-	)
+	err := resilience.RetryWithBackoff(ctx, func() error {
+		_, err := TransactionLogCollection.InsertOne(ctx, doc)
+		return err
+	}, 3, 1*time.Second)
+
 	if err != nil {
 		log.Printf("Gagal log ke Mongo (breaker): %v (tx_id=%s, status=%s)", err, event.TxID, status)
 	} else {

@@ -122,16 +122,25 @@ func StartKafkaConsumer() {
 	log.Printf("Kafka consumer started, group: transaction-worker-group, topic: %s", config.AppConfig.KafkaTopic)
 
 	for {
-		msg, err := resilience.ExecuteWithBreaker[kafka.Message](
+		var msg kafka.Message
+
+		_, breakerErr := resilience.ExecuteWithBreaker[kafka.Message](
 			context.Background(),
 			resilience.KafkaConsumerBreaker,
 			"KafkaRead",
 			func() (kafka.Message, error) {
-				return kafkaReader.ReadMessage(context.Background())
+				retryErr := resilience.RetryWithBackoff(context.Background(), func() error {
+					var innerErr error
+					msg, innerErr = kafkaReader.ReadMessage(context.Background())
+					return innerErr
+				}, 3, 500*time.Millisecond)
+
+				return msg, retryErr
 			},
 		)
-		if err != nil {
-			log.Printf("Kafka read ditolak breaker: %v", err)
+
+		if breakerErr != nil {
+			log.Printf("Kafka read ditolak breaker: %v", breakerErr)
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -171,7 +180,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 	var newStatus string = "success"
 	var details string = "Processed successfully"
 
-	_, err := resilience.ExecuteWithBreaker[struct{}](
+	_, breakerErr := resilience.ExecuteWithBreaker[struct{}](
 		ctx,
 		resilience.PostgresBreaker,
 		"PostgresProcessTx",
@@ -184,31 +193,41 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 				return struct{}{}, nil
 			}
 
-			_, err = database.PostgresPool.Exec(ctx,
-				`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
-				 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())`,
-				event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type)
+			err = resilience.RetryWithBackoff(ctx, func() error {
+				_, err := database.PostgresPool.Exec(ctx,
+					`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
+					 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())`,
+					event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type)
+				return err
+			}, 3, 500*time.Millisecond)
+
 			if err != nil {
-				log.Printf("Gagal insert pending %s: %v", event.TxID, err)
-				database.LogToMongo(*event, "failed", "Insert pending gagal")
+				log.Printf("Gagal insert pending setelah retry: %v", err)
+				database.LogToMongo(*event, "failed", "Insert pending gagal setelah retry")
 				return struct{}{}, err
 			}
 
 			var userBalance float64
-			err = database.PostgresPool.QueryRow(ctx,
-				"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).Scan(&userBalance)
+			err = resilience.RetryWithBackoff(ctx, func() error {
+				return database.PostgresPool.QueryRow(ctx,
+					"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).Scan(&userBalance)
+			}, 3, 500*time.Millisecond)
+
 			if err != nil {
-				log.Printf("Gagal ambil saldo user %d: %v", event.UserID, err)
+				log.Printf("Gagal ambil saldo user setelah retry: %v", err)
 				database.LogToMongo(*event, "failed", "User not found")
 				return struct{}{}, err
 			}
 
 			var recipientBalance float64
 			if event.Type == "transfer" && event.RecipientID != 0 {
-				err = database.PostgresPool.QueryRow(ctx,
-					"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.RecipientID).Scan(&recipientBalance)
+				err = resilience.RetryWithBackoff(ctx, func() error {
+					return database.PostgresPool.QueryRow(ctx,
+						"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.RecipientID).Scan(&recipientBalance)
+				}, 3, 500*time.Millisecond)
+
 				if err != nil {
-					log.Printf("Gagal ambil saldo recipient %d: %v", event.RecipientID, err)
+					log.Printf("Gagal ambil saldo recipient setelah retry: %v", err)
 					database.LogToMongo(*event, "failed", "Recipient not found")
 					return struct{}{}, err
 				}
@@ -250,36 +269,52 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 			}
 			defer txDB.Rollback(ctx)
 
-			_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", userBalance, event.UserID)
+			err = resilience.RetryWithBackoff(ctx, func() error {
+				_, err := txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2",
+					userBalance, event.UserID)
+				return err
+			}, 3, 500*time.Millisecond)
 			if err != nil {
-				log.Printf("Gagal update balance user: %v", err)
+				log.Printf("Gagal update balance user setelah retry: %v", err)
 				return struct{}{}, err
 			}
 
 			if event.Type == "transfer" && event.RecipientID != 0 {
-				_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", recipientBalance, event.RecipientID)
+				err = resilience.RetryWithBackoff(ctx, func() error {
+					_, err := txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2",
+						recipientBalance, event.RecipientID)
+					return err
+				}, 3, 500*time.Millisecond)
 				if err != nil {
-					log.Printf("Gagal update balance recipient: %v", err)
+					log.Printf("Gagal update balance recipient setelah retry: %v", err)
 					return struct{}{}, err
 				}
 			}
 
-			_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2", newStatus, event.TxID)
+			err = resilience.RetryWithBackoff(ctx, func() error {
+				_, err := txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2",
+					newStatus, event.TxID)
+				return err
+			}, 3, 500*time.Millisecond)
 			if err != nil {
-				log.Printf("Gagal update status: %v", err)
+				log.Printf("Gagal update status setelah retry: %v", err)
 				return struct{}{}, err
 			}
 
-			if err := txDB.Commit(ctx); err != nil {
-				log.Printf("Gagal commit: %v", err)
+			err = resilience.RetryWithBackoff(ctx, func() error {
+				return txDB.Commit(ctx)
+			}, 3, 500*time.Millisecond)
+			if err != nil {
+				log.Printf("Gagal commit setelah retry: %v", err)
 				return struct{}{}, err
 			}
 
 			return struct{}{}, nil
 		},
 	)
-	if err != nil {
-		log.Printf("Postgres process ditolak breaker: %v", err)
+
+	if breakerErr != nil {
+		log.Printf("Postgres process ditolak breaker: %v", breakerErr)
 		return
 	}
 
