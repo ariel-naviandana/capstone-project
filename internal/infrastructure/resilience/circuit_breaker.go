@@ -31,6 +31,17 @@ var (
 			log.Printf("Circuit Breaker %s changed from %s to %s", name, from, to)
 		},
 	})
+
+	PostgresBreaker = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        "Postgres",
+		ReadyToTrip: func(counts gobreaker.Counts) bool { return counts.ConsecutiveFailures >= 3 },
+		Timeout:     10 * time.Second,
+		MaxRequests: 1,
+		Interval:    0,
+		OnStateChange: func(name string, from, to gobreaker.State) {
+			log.Printf("Circuit Breaker %s changed from %s to %s", name, from, to)
+		},
+	})
 )
 
 func ExecuteWithBreaker[T any](ctx context.Context, breaker *gobreaker.CircuitBreaker, name string, fn func() (T, error)) (T, error) {

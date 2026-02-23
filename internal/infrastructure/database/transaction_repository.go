@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -40,16 +41,21 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 		recipientID = 0
 	}
 
-	err := r.db.QueryRow(ctx, query,
-		input.UserID,
-		recipientID,
-		input.Amount,
-		input.Type,
-		input.Description,
-	).Scan(&id)
-
+	_, err := resilience.ExecuteWithBreaker[int64](ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (int64, error) {
+		err := r.db.QueryRow(ctx, query,
+			input.UserID,
+			recipientID,
+			input.Amount,
+			input.Type,
+			input.Description,
+		).Scan(&id)
+		if err != nil {
+			return 0, fmt.Errorf("failed to insert transaction: %w", err)
+		}
+		return id, nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("failed to insert transaction: %w", err)
+		return 0, err
 	}
 
 	return id, nil
@@ -62,18 +68,25 @@ func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*do
 		FROM transactions
 		WHERE tx_id = $1
 	`
-	err := r.db.QueryRow(ctx, query, txID).Scan(
-		&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
-		&detail.Amount, &detail.Type, &detail.Status,
-		&detail.CreatedAt, &detail.UpdatedAt,
-	)
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("transaction not found")
-	}
+
+	result, err := resilience.ExecuteWithBreaker[*domain.TransactionDetail](ctx, resilience.PostgresBreaker, "PostgresGetByTxID", func() (*domain.TransactionDetail, error) {
+		err := r.db.QueryRow(ctx, query, txID).Scan(
+			&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
+			&detail.Amount, &detail.Type, &detail.Status,
+			&detail.CreatedAt, &detail.UpdatedAt,
+		)
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("transaction not found")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to get transaction: %w", err)
+		}
+		return &detail, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %w", err)
+		return nil, err
 	}
-	return &detail, nil
+	return result, nil
 }
 
 func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64) (*domain.UserBalance, error) {
@@ -83,12 +96,19 @@ func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64
 		FROM users
 		WHERE id = $1
 	`
-	err := r.db.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("user not found")
-	}
+
+	result, err := resilience.ExecuteWithBreaker[*domain.UserBalance](ctx, resilience.PostgresBreaker, "PostgresGetUserBalance", func() (*domain.UserBalance, error) {
+		err := r.db.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("user not found")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to get user balance: %w", err)
+		}
+		return &ub, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user balance: %w", err)
+		return nil, err
 	}
-	return &ub, nil
+	return result, nil
 }

@@ -151,7 +151,7 @@ func StartKafkaConsumer() {
 }
 
 func processTransactionEvent(event *domain.KafkaTransactionEvent) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	cacheKey := "tx:" + event.TxID
@@ -168,102 +168,118 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 	}
 	cache.SetCache(ctx, cacheKey, pendingDetail, 5*time.Minute)
 
-	var existing string
-	err := database.PostgresPool.QueryRow(ctx,
-		"SELECT tx_id FROM transactions WHERE tx_id = $1", event.TxID).Scan(&existing)
-	if err == nil {
-		log.Printf("Tx %s sudah diproses sebelumnya", event.TxID)
-		return
-	}
-
-	_, err = database.PostgresPool.Exec(ctx,
-		`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())`,
-		event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type)
-	if err != nil {
-		log.Printf("Gagal insert pending %s: %v", event.TxID, err)
-		database.LogToMongo(*event, "failed", "Insert pending gagal")
-		return
-	}
-
-	var userBalance float64
-	err = database.PostgresPool.QueryRow(ctx,
-		"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).Scan(&userBalance)
-	if err != nil {
-		log.Printf("Gagal ambil saldo user %d: %v", event.UserID, err)
-		database.LogToMongo(*event, "failed", "User not found")
-		return
-	}
-
-	var recipientBalance float64
-	if event.Type == "transfer" && event.RecipientID != 0 {
-		err = database.PostgresPool.QueryRow(ctx,
-			"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.RecipientID).Scan(&recipientBalance)
-		if err != nil {
-			log.Printf("Gagal ambil saldo recipient %d: %v", event.RecipientID, err)
-			database.LogToMongo(*event, "failed", "Recipient not found")
-			return
-		}
-	}
-
 	var newStatus string = "success"
-	var details string
+	var details string = "Processed successfully"
 
-	switch event.Type {
-	case "deposit":
-		userBalance += event.Amount
-		details = fmt.Sprintf("Deposit +%.2f", event.Amount)
-	case "withdraw":
-		if userBalance < event.Amount {
-			newStatus = "failed"
-			details = "Saldo tidak cukup"
-		} else {
-			userBalance -= event.Amount
-			details = fmt.Sprintf("Withdraw -%.2f", event.Amount)
-		}
-	case "transfer":
-		if userBalance < event.Amount {
-			newStatus = "failed"
-			details = "Saldo pengirim tidak cukup"
-		} else {
-			userBalance -= event.Amount
-			recipientBalance += event.Amount
-			details = fmt.Sprintf("Transfer %.2f ke user %d", event.Amount, event.RecipientID)
-		}
-	default:
-		newStatus = "failed"
-		details = "Type tidak dikenal"
-	}
+	_, err := resilience.ExecuteWithBreaker[struct{}](
+		ctx,
+		resilience.PostgresBreaker,
+		"PostgresProcessTx",
+		func() (struct{}, error) {
+			var existing string
+			err := database.PostgresPool.QueryRow(ctx,
+				"SELECT tx_id FROM transactions WHERE tx_id = $1", event.TxID).Scan(&existing)
+			if err == nil {
+				log.Printf("Tx %s sudah diproses sebelumnya", event.TxID)
+				return struct{}{}, nil
+			}
 
-	txDB, err := database.PostgresPool.Begin(ctx)
+			_, err = database.PostgresPool.Exec(ctx,
+				`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
+				 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())`,
+				event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type)
+			if err != nil {
+				log.Printf("Gagal insert pending %s: %v", event.TxID, err)
+				database.LogToMongo(*event, "failed", "Insert pending gagal")
+				return struct{}{}, err
+			}
+
+			var userBalance float64
+			err = database.PostgresPool.QueryRow(ctx,
+				"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).Scan(&userBalance)
+			if err != nil {
+				log.Printf("Gagal ambil saldo user %d: %v", event.UserID, err)
+				database.LogToMongo(*event, "failed", "User not found")
+				return struct{}{}, err
+			}
+
+			var recipientBalance float64
+			if event.Type == "transfer" && event.RecipientID != 0 {
+				err = database.PostgresPool.QueryRow(ctx,
+					"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.RecipientID).Scan(&recipientBalance)
+				if err != nil {
+					log.Printf("Gagal ambil saldo recipient %d: %v", event.RecipientID, err)
+					database.LogToMongo(*event, "failed", "Recipient not found")
+					return struct{}{}, err
+				}
+			}
+
+			switch event.Type {
+			case "deposit":
+				userBalance += event.Amount
+				details = fmt.Sprintf("Deposit +%.2f", event.Amount)
+
+			case "withdraw":
+				if userBalance < event.Amount {
+					newStatus = "failed"
+					details = "Saldo tidak cukup"
+				} else {
+					userBalance -= event.Amount
+					details = fmt.Sprintf("Withdraw -%.2f", event.Amount)
+				}
+
+			case "transfer":
+				if userBalance < event.Amount {
+					newStatus = "failed"
+					details = "Saldo pengirim tidak cukup"
+				} else {
+					userBalance -= event.Amount
+					recipientBalance += event.Amount
+					details = fmt.Sprintf("Transfer %.2f ke user %d", event.Amount, event.RecipientID)
+				}
+
+			default:
+				newStatus = "failed"
+				details = "Type tidak dikenal"
+			}
+
+			txDB, err := database.PostgresPool.Begin(ctx)
+			if err != nil {
+				log.Printf("Gagal begin tx: %v", err)
+				return struct{}{}, err
+			}
+			defer txDB.Rollback(ctx)
+
+			_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", userBalance, event.UserID)
+			if err != nil {
+				log.Printf("Gagal update balance user: %v", err)
+				return struct{}{}, err
+			}
+
+			if event.Type == "transfer" && event.RecipientID != 0 {
+				_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", recipientBalance, event.RecipientID)
+				if err != nil {
+					log.Printf("Gagal update balance recipient: %v", err)
+					return struct{}{}, err
+				}
+			}
+
+			_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2", newStatus, event.TxID)
+			if err != nil {
+				log.Printf("Gagal update status: %v", err)
+				return struct{}{}, err
+			}
+
+			if err := txDB.Commit(ctx); err != nil {
+				log.Printf("Gagal commit: %v", err)
+				return struct{}{}, err
+			}
+
+			return struct{}{}, nil
+		},
+	)
 	if err != nil {
-		log.Printf("Gagal begin tx: %v", err)
-		return
-	}
-	defer txDB.Rollback(ctx)
-
-	_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", userBalance, event.UserID)
-	if err != nil {
-		log.Printf("Gagal update balance user: %v", err)
-		return
-	}
-
-	if event.Type == "transfer" && event.RecipientID != 0 {
-		_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", recipientBalance, event.RecipientID)
-		if err != nil {
-			log.Printf("Gagal update balance recipient: %v", err)
-			return
-		}
-	}
-
-	_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2", newStatus, event.TxID)
-	if err != nil {
-		log.Printf("Gagal update status: %v", err)
-		return
-	}
-
-	if err := txDB.Commit(ctx); err != nil {
-		log.Printf("Gagal commit: %v", err)
+		log.Printf("Postgres process ditolak breaker: %v", err)
 		return
 	}
 
