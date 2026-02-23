@@ -7,6 +7,7 @@ import (
 
 	"github.com/capstone-b4/capstone-go/internal/config"
 	"github.com/capstone-b4/capstone-go/internal/domain"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -93,9 +94,16 @@ func LogToMongo(event domain.KafkaTransactionEvent, status string, details strin
 		"timestamp": time.Now().UTC(),
 	}
 
-	_, err := TransactionLogCollection.InsertOne(ctx, doc)
+	_, err := resilience.ExecuteWithBreaker[interface{}](
+		ctx,
+		resilience.MongoBreaker,
+		"MongoLogInsert",
+		func() (interface{}, error) {
+			return TransactionLogCollection.InsertOne(ctx, doc)
+		},
+	)
 	if err != nil {
-		log.Printf("Gagal log ke Mongo: %v", err)
+		log.Printf("Gagal log ke Mongo (breaker): %v (tx_id=%s, status=%s)", err, event.TxID, status)
 	} else {
 		log.Printf("Logged to Mongo: tx_id=%s, status=%s", event.TxID, status)
 	}
