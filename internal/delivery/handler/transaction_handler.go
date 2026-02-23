@@ -77,11 +77,21 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 
 	detail, err := h.service.GetByTxID(c.Request.Context(), txID)
 	if err != nil {
+		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
+			log.Printf("Breaker reject di GetByTxID tx_id=%s: %v", txID, err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "Sistem sedang overload atau database sibuk",
+				"message": "Transaksi sedang diproses, coba lagi dalam beberapa detik",
+				"status":  "processing",
+			})
+			return
+		}
+
 		if err.Error() == "transaction not found" || strings.Contains(err.Error(), "no rows") {
 			log.Printf("Transaction %s belum ada di DB, masih processing", txID)
 			c.JSON(http.StatusOK, gin.H{
 				"tx_id":   txID,
-				"status":  "pending",
+				"status":  "processing",
 				"message": "Transaksi sedang diproses, coba lagi dalam beberapa detik",
 			})
 			return
@@ -117,10 +127,20 @@ func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
 
 	balance, err := h.service.GetUserBalance(c.Request.Context(), userID)
 	if err != nil {
+		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
+			log.Printf("Breaker reject di GetUserBalance user_id=%d: %v", userID, err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "Sistem sedang overload atau database sibuk",
+				"message": "Saldo sedang diproses, coba lagi dalam beberapa detik",
+			})
+			return
+		}
+
 		if err.Error() == "user not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get balance"})
+			log.Printf("Gagal get balance user_id=%d: %v", userID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get balance", "detail": err.Error()})
 		}
 		return
 	}
