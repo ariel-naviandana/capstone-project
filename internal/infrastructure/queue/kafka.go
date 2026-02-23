@@ -105,6 +105,10 @@ func CloseKafkaProducer() {
 
 var kafkaReader *kafka.Reader
 
+const maxConcurrent = 10
+
+var processSemaphore = make(chan struct{}, maxConcurrent)
+
 func StartKafkaConsumer() {
 	brokers := config.AppConfig.KafkaBrokers
 	if len(brokers) == 0 {
@@ -119,7 +123,7 @@ func StartKafkaConsumer() {
 		MaxBytes: 10e6,
 	})
 
-	log.Printf("Kafka consumer started, group: transaction-worker-group, topic: %s", config.AppConfig.KafkaTopic)
+	log.Printf("Kafka consumer started, group: transaction-worker-group, topic: %s, max concurrent: %d", config.AppConfig.KafkaTopic, maxConcurrent)
 
 	for {
 		var msg kafka.Message
@@ -145,17 +149,26 @@ func StartKafkaConsumer() {
 			continue
 		}
 
-		var event domain.KafkaTransactionEvent
-		if err := json.Unmarshal(msg.Value, &event); err != nil {
-			log.Printf("Error unmarshal: %v", err)
-			continue
-		}
+		processSemaphore <- struct{}{}
 
-		log.Printf("Received event: tx_id=%s, type=%s", event.TxID, event.Type)
+		go func(msg kafka.Message) {
+			defer func() { <-processSemaphore }()
 
-		processTransactionEvent(&event)
+			var event domain.KafkaTransactionEvent
+			if err := json.Unmarshal(msg.Value, &event); err != nil {
+				log.Printf("Error unmarshal: %v", err)
+				return
+			}
 
-		kafkaReader.CommitMessages(context.Background(), msg)
+			log.Printf("Received event: tx_id=%s, type=%s (concurrent: %d/%d)",
+				event.TxID, event.Type, maxConcurrent-len(processSemaphore), maxConcurrent)
+
+			processTransactionEvent(&event)
+
+			if err := kafkaReader.CommitMessages(context.Background(), msg); err != nil {
+				log.Printf("Gagal commit offset: %v", err)
+			}
+		}(msg)
 	}
 }
 
