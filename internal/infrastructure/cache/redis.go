@@ -73,15 +73,25 @@ func SetCache(ctx context.Context, key string, value interface{}, ttl time.Durat
 
 func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) (int, error) {
 	pipe := RedisClient.Pipeline()
-	incr := pipe.Incr(ctx, key)
-	pipe.Expire(ctx, key, expiry)
+	incrCmd := pipe.Incr(ctx, key)
+	expireCmd := pipe.Expire(ctx, key, expiry)
 
 	_, err := pipe.Exec(ctx)
 	if err != nil {
 		return 0, err
 	}
 
-	return int(incr.Val()), nil
+	count, err := incrCmd.Result()
+	if err != nil {
+		return 0, err
+	}
+
+	_, err = expireCmd.Result()
+	if err != nil {
+		log.Printf("Expire failed for key %s: %v", key, err)
+	}
+
+	return int(count), nil
 }
 
 func GetRateLimitStatus(ctx context.Context, key string) (int, time.Duration, error) {
