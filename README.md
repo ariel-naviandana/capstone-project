@@ -1,4 +1,4 @@
-# Capstone Go: Exploding User Data Scalabilities
+# Capstone B.4 : Exploding User Data Scalabilities
 
 Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggunakan Go. Fokus pada resilience, observability, dan handling overload.
 
