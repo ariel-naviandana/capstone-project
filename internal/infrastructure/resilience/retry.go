@@ -2,10 +2,10 @@ package resilience
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/rs/zerolog/log"
 )
 
 func RetryWithBackoff(ctx context.Context, operation func() error, maxRetries int, initialInterval time.Duration) error {
@@ -15,11 +15,17 @@ func RetryWithBackoff(ctx context.Context, operation func() error, maxRetries in
 	bo.MaxElapsedTime = 30 * time.Second
 
 	notify := func(err error, duration time.Duration) {
-		log.Printf("Retry attempt after %v: %v", duration, err)
+		log.Warn().
+			Err(err).
+			Dur("duration", duration).
+			Msg("Retry attempt")
 	}
 
 	err := backoff.RetryNotify(operation, bo, notify)
 	if err != nil {
+		log.Warn().
+			Err(err).
+			Msg("Retry failed after max attempts")
 		return err
 	}
 

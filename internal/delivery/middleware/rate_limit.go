@@ -1,18 +1,20 @@
 package middleware
 
 import (
-	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
 	"github.com/gin-gonic/gin"
 )
 
 func RateLimiter() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		logger := logging.GetLogger(c)
+
 		userID := c.GetHeader("X-User-ID")
 		var identifier string
 		if userID != "" {
@@ -31,7 +33,12 @@ func RateLimiter() gin.HandlerFunc {
 
 		count, err := cache.IncrementWithExpiry(c.Request.Context(), key, time.Duration(windowSec)*time.Second)
 		if err != nil {
-			log.Printf("Rate limit Redis error: %v", err)
+			logger.Warn().
+				Err(err).
+				Str("key", key).
+				Str("identifier", identifier).
+				Str("path", c.FullPath()).
+				Msg("Rate limit Redis error, continuing without limit check")
 			c.Next()
 			return
 		}
@@ -44,6 +51,13 @@ func RateLimiter() gin.HandlerFunc {
 		c.Header("X-RateLimit-Window", strconv.Itoa(windowSec))
 
 		if count > limit {
+			logger.Warn().
+				Int("count", count).
+				Int("limit", limit).
+				Str("identifier", identifier).
+				Str("path", c.FullPath()).
+				Msg("Rate limit exceeded")
+
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error":       "Too many requests",
 				"message":     "Anda telah mencapai batas request, silakan coba lagi nanti",

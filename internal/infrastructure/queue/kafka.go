@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
@@ -12,6 +11,8 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -20,7 +21,7 @@ var kafkaWriter *kafka.Writer
 func InitKafkaProducer() {
 	brokers := config.AppConfig.KafkaBrokers
 	if len(brokers) == 0 {
-		log.Fatal("KAFKA_BROKERS tidak ditemukan di config")
+		log.Fatal().Msg("KAFKA_BROKERS tidak ditemukan di config")
 	}
 
 	createTopicIfNotExist(brokers[0], config.AppConfig.KafkaTopic)
@@ -32,20 +33,23 @@ func InitKafkaProducer() {
 		Async:    false,
 	}
 
-	log.Printf("Kafka producer initialized dengan brokers: %v, topic: %s", brokers, config.AppConfig.KafkaTopic)
+	log.Info().
+		Strs("brokers", brokers).
+		Str("topic", config.AppConfig.KafkaTopic).
+		Msg("Kafka producer initialized")
 }
 
 func createTopicIfNotExist(broker string, topic string) {
 	conn, err := kafka.Dial("tcp", broker)
 	if err != nil {
-		log.Printf("Gagal connect ke broker: %v", err)
+		log.Warn().Err(err).Str("broker", broker).Msg("Gagal connect ke broker untuk create topic")
 		return
 	}
 	defer conn.Close()
 
 	partitions, err := conn.ReadPartitions(topic)
 	if err == nil && len(partitions) > 0 {
-		log.Printf("Topic %s sudah ada", topic)
+		log.Info().Str("topic", topic).Msg("Topic sudah ada")
 		return
 	}
 
@@ -55,14 +59,14 @@ func createTopicIfNotExist(broker string, topic string) {
 		ReplicationFactor: 1,
 	})
 	if err != nil {
-		log.Printf("Gagal auto-create topic %s: %v", topic, err)
+		log.Warn().Err(err).Str("topic", topic).Msg("Gagal auto-create topic")
 		return
 	}
 
-	log.Printf("Topic %s berhasil dibuat otomatis", topic)
+	log.Info().Str("topic", topic).Msg("Topic berhasil dibuat otomatis")
 }
 
-func PublishTransactionEvent(txID string, userID int64, recipientID int64, amount float64, txType string) error {
+func PublishTransactionEvent(txID string, userID int64, recipientID int64, amount float64, txType string, traceID string) error {
 	if kafkaWriter == nil {
 		return fmt.Errorf("kafka writer belum di-init")
 	}
@@ -78,28 +82,46 @@ func PublishTransactionEvent(txID string, userID int64, recipientID int64, amoun
 
 	data, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("gagal marshal: %v", err)
+		log.Error().Err(err).Msg("Gagal marshal message untuk Kafka")
+		return fmt.Errorf("gagal marshal: %w", err)
 	}
 
 	err = kafkaWriter.WriteMessages(context.Background(),
 		kafka.Message{
 			Key:   []byte(txID),
 			Value: data,
+			Headers: []kafka.Header{
+				{Key: "trace_id", Value: []byte(traceID)},
+			},
 		},
 	)
 	if err != nil {
-		log.Printf("Gagal publish ke Kafka: %v", err)
+		log.Warn().
+			Err(err).
+			Str("tx_id", txID).
+			Str("type", txType).
+			Msg("Gagal publish ke Kafka")
 		return fmt.Errorf("gagal publish ke Kafka: %w", err)
 	}
 
-	log.Printf("Berhasil publish: tx_id=%s, type=%s", txID, txType)
+	log.Debug().
+		Str("tx_id", txID).
+		Str("trace_id_sent", traceID).
+		Msg("Headers dikirim ke Kafka (trace_id)")
+
+	log.Info().
+		Str("tx_id", txID).
+		Str("type", txType).
+		Str("trace_id", traceID).
+		Msg("Berhasil publish ke Kafka")
+
 	return nil
 }
 
 func CloseKafkaProducer() {
 	if kafkaWriter != nil {
 		kafkaWriter.Close()
-		log.Println("Kafka producer ditutup")
+		log.Info().Msg("Kafka producer ditutup")
 	}
 }
 
@@ -112,7 +134,7 @@ var processSemaphore = make(chan struct{}, maxConcurrent)
 func StartKafkaConsumer() {
 	brokers := config.AppConfig.KafkaBrokers
 	if len(brokers) == 0 {
-		log.Fatal("KAFKA_BROKERS tidak ditemukan")
+		log.Fatal().Msg("KAFKA_BROKERS tidak ditemukan")
 	}
 
 	kafkaReader = kafka.NewReader(kafka.ReaderConfig{
@@ -123,7 +145,11 @@ func StartKafkaConsumer() {
 		MaxBytes: 10e6,
 	})
 
-	log.Printf("Kafka consumer started, group: transaction-worker-group, topic: %s, max concurrent: %d", config.AppConfig.KafkaTopic, maxConcurrent)
+	log.Info().
+		Str("group_id", "transaction-worker-group").
+		Str("topic", config.AppConfig.KafkaTopic).
+		Int("max_concurrent", maxConcurrent).
+		Msg("Kafka consumer started")
 
 	for {
 		var msg kafka.Message
@@ -144,7 +170,9 @@ func StartKafkaConsumer() {
 		)
 
 		if breakerErr != nil {
-			log.Printf("Kafka read ditolak breaker: %v", breakerErr)
+			log.Warn().
+				Err(breakerErr).
+				Msg("Kafka read ditolak breaker, sleep 1s")
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -154,25 +182,57 @@ func StartKafkaConsumer() {
 		go func(msg kafka.Message) {
 			defer func() { <-processSemaphore }()
 
+			headersLog := make(map[string]string)
+			for _, h := range msg.Headers {
+				headersLog[string(h.Key)] = string(h.Value)
+			}
+
+			eventLogger := log.With().
+				Interface("kafka_headers_received", headersLog).
+				Logger()
+
+			eventLogger.Debug().Msg("All Kafka headers received")
+
+			var traceID string
+			for _, h := range msg.Headers {
+				if string(h.Key) == "trace_id" {
+					traceID = string(h.Value)
+					break
+				}
+			}
+
+			if traceID == "" {
+				traceID = "unknown-" + time.Now().Format("20060102-150405")
+			}
+
+			eventLogger = eventLogger.With().Str("trace_id", traceID).Logger()
+
 			var event domain.KafkaTransactionEvent
 			if err := json.Unmarshal(msg.Value, &event); err != nil {
-				log.Printf("Error unmarshal: %v", err)
+				eventLogger.Error().
+					Err(err).
+					Msg("Error unmarshal Kafka message")
 				return
 			}
 
-			log.Printf("Received event: tx_id=%s, type=%s (concurrent: %d/%d)",
-				event.TxID, event.Type, maxConcurrent-len(processSemaphore), maxConcurrent)
+			eventLogger.Info().
+				Str("tx_id", event.TxID).
+				Str("type", event.Type).
+				Int("concurrent", maxConcurrent-len(processSemaphore)).
+				Msg("Received event")
 
-			processTransactionEvent(&event)
+			processTransactionEvent(&event, eventLogger)
 
 			if err := kafkaReader.CommitMessages(context.Background(), msg); err != nil {
-				log.Printf("Gagal commit offset: %v", err)
+				eventLogger.Warn().
+					Err(err).
+					Msg("Gagal commit offset")
 			}
 		}(msg)
 	}
 }
 
-func processTransactionEvent(event *domain.KafkaTransactionEvent) {
+func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -202,7 +262,9 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 			err := database.PostgresPool.QueryRow(ctx,
 				"SELECT tx_id FROM transactions WHERE tx_id = $1", event.TxID).Scan(&existing)
 			if err == nil {
-				log.Printf("Tx %s sudah diproses sebelumnya", event.TxID)
+				logger.Info().
+					Str("tx_id", event.TxID).
+					Msg("Tx sudah diproses sebelumnya")
 				return struct{}{}, nil
 			}
 
@@ -215,7 +277,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 			}, 3, 500*time.Millisecond)
 
 			if err != nil {
-				log.Printf("Gagal insert pending setelah retry: %v", err)
+				logger.Warn().
+					Err(err).
+					Str("tx_id", event.TxID).
+					Msg("Gagal insert pending setelah retry")
 				database.LogToMongo(*event, "failed", "Insert pending gagal setelah retry")
 				return struct{}{}, err
 			}
@@ -227,7 +292,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 			}, 3, 500*time.Millisecond)
 
 			if err != nil {
-				log.Printf("Gagal ambil saldo user setelah retry: %v", err)
+				logger.Warn().
+					Err(err).
+					Int64("user_id", event.UserID).
+					Msg("Gagal ambil saldo user setelah retry")
 				database.LogToMongo(*event, "failed", "User not found")
 				return struct{}{}, err
 			}
@@ -240,7 +308,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 				}, 3, 500*time.Millisecond)
 
 				if err != nil {
-					log.Printf("Gagal ambil saldo recipient setelah retry: %v", err)
+					logger.Warn().
+						Err(err).
+						Int64("recipient_id", event.RecipientID).
+						Msg("Gagal ambil saldo recipient setelah retry")
 					database.LogToMongo(*event, "failed", "Recipient not found")
 					return struct{}{}, err
 				}
@@ -277,7 +348,9 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 
 			txDB, err := database.PostgresPool.Begin(ctx)
 			if err != nil {
-				log.Printf("Gagal begin tx: %v", err)
+				logger.Warn().
+					Err(err).
+					Msg("Gagal begin tx")
 				return struct{}{}, err
 			}
 			defer txDB.Rollback(ctx)
@@ -288,7 +361,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 				return err
 			}, 3, 500*time.Millisecond)
 			if err != nil {
-				log.Printf("Gagal update balance user setelah retry: %v", err)
+				logger.Warn().
+					Err(err).
+					Int64("user_id", event.UserID).
+					Msg("Gagal update balance user setelah retry")
 				return struct{}{}, err
 			}
 
@@ -299,7 +375,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 					return err
 				}, 3, 500*time.Millisecond)
 				if err != nil {
-					log.Printf("Gagal update balance recipient setelah retry: %v", err)
+					logger.Warn().
+						Err(err).
+						Int64("recipient_id", event.RecipientID).
+						Msg("Gagal update balance recipient setelah retry")
 					return struct{}{}, err
 				}
 			}
@@ -310,7 +389,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 				return err
 			}, 3, 500*time.Millisecond)
 			if err != nil {
-				log.Printf("Gagal update status setelah retry: %v", err)
+				logger.Warn().
+					Err(err).
+					Str("tx_id", event.TxID).
+					Msg("Gagal update status setelah retry")
 				return struct{}{}, err
 			}
 
@@ -318,7 +400,9 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 				return txDB.Commit(ctx)
 			}, 3, 500*time.Millisecond)
 			if err != nil {
-				log.Printf("Gagal commit setelah retry: %v", err)
+				logger.Warn().
+					Err(err).
+					Msg("Gagal commit setelah retry")
 				return struct{}{}, err
 			}
 
@@ -327,7 +411,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 	)
 
 	if breakerErr != nil {
-		log.Printf("Postgres process ditolak breaker: %v", breakerErr)
+		logger.Warn().
+			Err(breakerErr).
+			Str("tx_id", event.TxID).
+			Msg("Postgres process ditolak breaker")
 		return
 	}
 
@@ -345,12 +432,16 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent) {
 
 	database.LogToMongo(*event, newStatus, details)
 
-	log.Printf("Processed tx_id=%s: status=%s, details=%s", event.TxID, newStatus, details)
+	logger.Info().
+		Str("tx_id", event.TxID).
+		Str("status", newStatus).
+		Str("details", details).
+		Msg("Processed tx")
 }
 
 func CloseKafkaConsumer() {
 	if kafkaReader != nil {
 		kafkaReader.Close()
-		log.Println("Kafka consumer closed")
+		log.Info().Msg("Kafka consumer closed")
 	}
 }

@@ -3,11 +3,11 @@ package cache
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog/log"
 )
 
 var RedisClient *redis.Client
@@ -24,16 +24,21 @@ func ConnectRedis() {
 
 	_, err := RedisClient.Ping(ctx).Result()
 	if err != nil {
-		log.Fatalf("Gagal connect Redis: %v", err)
+		log.Fatal().
+			Err(err).
+			Str("addr", config.AppConfig.RedisAddr).
+			Msg("Gagal connect Redis")
 	}
 
-	log.Println("Connected to Redis")
+	log.Info().
+		Str("addr", config.AppConfig.RedisAddr).
+		Msg("Connected to Redis")
 }
 
 func CloseRedis() {
 	if RedisClient != nil {
 		RedisClient.Close()
-		log.Println("Redis disconnected")
+		log.Info().Msg("Redis disconnected")
 	}
 }
 
@@ -43,13 +48,19 @@ func GetCached[T any](ctx context.Context, key string) (*T, bool) {
 		return nil, false
 	}
 	if err != nil {
-		log.Printf("Redis get error: %v", err)
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Msg("Redis get error")
 		return nil, false
 	}
 
 	var data T
 	if err := json.Unmarshal([]byte(val), &data); err != nil {
-		log.Printf("Redis unmarshal error: %v", err)
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Msg("Redis unmarshal error")
 		return nil, false
 	}
 
@@ -59,14 +70,25 @@ func GetCached[T any](ctx context.Context, key string) (*T, bool) {
 func SetCache(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	data, err := json.Marshal(value)
 	if err != nil {
+		log.Error().
+			Err(err).
+			Str("key", key).
+			Msg("Gagal marshal value untuk Redis")
 		return err
 	}
 
 	err = RedisClient.Set(ctx, key, data, ttl).Err()
 	if err != nil {
-		log.Printf("Redis set error: %v", err)
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Dur("ttl", ttl).
+			Msg("Redis set error")
 	} else {
-		log.Printf("Redis set success: key=%s, ttl=%v", key, ttl)
+		log.Debug().
+			Str("key", key).
+			Dur("ttl", ttl).
+			Msg("Redis set success")
 	}
 	return err
 }
@@ -78,17 +100,29 @@ func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) 
 
 	_, err := pipe.Exec(ctx)
 	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Msg("Redis pipeline error in IncrementWithExpiry")
 		return 0, err
 	}
 
 	count, err := incrCmd.Result()
 	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Msg("Gagal increment Redis key")
 		return 0, err
 	}
 
 	_, err = expireCmd.Result()
 	if err != nil {
-		log.Printf("Expire failed for key %s: %v", key, err)
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Dur("expiry", expiry).
+			Msg("Expire failed for Redis key")
 	}
 
 	return int(count), nil
@@ -100,11 +134,19 @@ func GetRateLimitStatus(ctx context.Context, key string) (int, time.Duration, er
 		return 0, 0, nil
 	}
 	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Msg("Redis get error in GetRateLimitStatus")
 		return 0, 0, err
 	}
 
 	ttl, err := RedisClient.TTL(ctx, key).Result()
 	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Msg("Redis TTL error in GetRateLimitStatus")
 		return count, 0, err
 	}
 

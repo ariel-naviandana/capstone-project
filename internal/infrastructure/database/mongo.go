@@ -2,12 +2,12 @@ package database
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
+	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -22,18 +22,22 @@ func ConnectMongo() {
 
 	uri := config.AppConfig.MongoURI
 	if uri == "" {
-		log.Fatal("MONGO_URI tidak ditemukan di config")
+		log.Fatal().Msg("MONGO_URI tidak ditemukan di config")
 	}
 
 	clientOptions := options.Client().ApplyURI(uri)
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
-		log.Fatalf("Gagal connect Mongo: %v", err)
+		log.Fatal().
+			Err(err).
+			Msg("Gagal connect Mongo")
 	}
 
 	err = client.Ping(ctx, nil)
 	if err != nil {
-		log.Fatalf("Mongo ping gagal: %v", err)
+		log.Fatal().
+			Err(err).
+			Msg("Mongo ping gagal")
 	}
 
 	MongoClient = client
@@ -41,7 +45,7 @@ func ConnectMongo() {
 
 	ensureIndexes()
 
-	log.Println("Connected to MongoDB & indexes ensured")
+	log.Info().Msg("Connected to MongoDB & indexes ensured")
 }
 
 func ensureIndexes() {
@@ -66,17 +70,20 @@ func ensureIndexes() {
 
 	_, err := TransactionLogCollection.Indexes().CreateMany(ctx, indexes)
 	if err != nil {
-		log.Printf("Gagal create index di Mongo: %v (lanjut tanpa index baru)", err)
+		log.Warn().
+			Err(err).
+			Msg("Gagal create index di Mongo (lanjut tanpa index baru)")
 		return
 	}
 
-	log.Println("Mongo indexes berhasil dibuat/diperiksa (tx_id, timestamp, status, user_id)")
+	log.Info().
+		Msg("Mongo indexes berhasil dibuat/diperiksa (tx_id, timestamp, status, user_id)")
 }
 
 func CloseMongo() {
 	if MongoClient != nil {
 		MongoClient.Disconnect(context.Background())
-		log.Println("MongoDB disconnected")
+		log.Info().Msg("MongoDB disconnected")
 	}
 }
 
@@ -100,8 +107,15 @@ func LogToMongo(event domain.KafkaTransactionEvent, status string, details strin
 	}, 3, 1*time.Second)
 
 	if err != nil {
-		log.Printf("Gagal log ke Mongo (breaker): %v (tx_id=%s, status=%s)", err, event.TxID, status)
+		log.Warn().
+			Err(err).
+			Str("tx_id", event.TxID).
+			Str("status", status).
+			Msg("Gagal log ke Mongo (breaker)")
 	} else {
-		log.Printf("Logged to Mongo: tx_id=%s, status=%s", event.TxID, status)
+		log.Info().
+			Str("tx_id", event.TxID).
+			Str("status", status).
+			Msg("Logged to Mongo")
 	}
 }

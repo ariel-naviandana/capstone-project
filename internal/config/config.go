@@ -1,9 +1,8 @@
 package config
 
 import (
-	"log"
-
 	"github.com/joho/godotenv"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 )
 
@@ -28,21 +27,22 @@ type Config struct {
 
 	RateLimitRequests int `mapstructure:"RATE_LIMIT_REQUESTS"`
 	RateLimitWindow   int `mapstructure:"RATE_LIMIT_WINDOW"`
+
+	LogInfo bool `mapstructure:"LOG_INFO"`
 }
 
 var AppConfig Config
 
 func LoadConfig() {
 	if err := godotenv.Load(".env"); err != nil {
-		log.Printf("Warning: godotenv.Load failed: %v", err)
+		log.Warn().Err(err).Msg("Warning: godotenv.Load failed (lanjut tanpa .env file)")
 	} else {
-		log.Println("godotenv successfully loaded .env")
+		log.Info().Msg("godotenv successfully loaded .env")
 	}
 
 	viper.AutomaticEnv()
 
 	viper.SetDefault("SERVER_PORT", "8000")
-
 	viper.BindEnv("SERVER_PORT")
 
 	viper.BindEnv("POSTGRES_HOST")
@@ -62,21 +62,26 @@ func LoadConfig() {
 
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 100)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
-
 	viper.BindEnv("RATE_LIMIT_REQUESTS")
 	viper.BindEnv("RATE_LIMIT_WINDOW")
 
+	viper.BindEnv("LOG_INFO")
+
 	if err := viper.Unmarshal(&AppConfig); err != nil {
-		log.Fatalf("Unmarshal error: %v", err)
+		log.Fatal().Err(err).Msg("Config unmarshal error")
 	}
 
-	log.Printf("Loaded SERVER_PORT: [%s]", AppConfig.ServerPort)
-	log.Printf("Loaded POSTGRES_HOST: [%s]", AppConfig.PostgresHost)
-	log.Printf("Loaded POSTGRES_DB: [%s]", AppConfig.PostgresDBName)
-	log.Printf("Loaded KAFKA_BROKERS: %v", AppConfig.KafkaBrokers)
-	log.Printf("Loaded KAFKA_TOPIC: [%s]", AppConfig.KafkaTopic)
-	log.Printf("Loaded MONGO_URI: [%s]", AppConfig.MongoURI)
-	log.Printf("Loaded REDIS_ADDR: [%s]", AppConfig.RedisAddr)
-
-	log.Println("Config loaded successfully")
+	if AppConfig.LogInfo {
+		log.Info().
+			Str("server_port", AppConfig.ServerPort).
+			Str("postgres_host", AppConfig.PostgresHost).
+			Str("postgres_db", AppConfig.PostgresDBName).
+			Strs("kafka_brokers", AppConfig.KafkaBrokers).
+			Str("kafka_topic", AppConfig.KafkaTopic).
+			Str("mongo_uri", AppConfig.MongoURI).
+			Str("redis_addr", AppConfig.RedisAddr).
+			Msg("Config loaded successfully with details")
+	} else {
+		log.Info().Msg("Config loaded successfully (detail skipped)")
+	}
 }

@@ -3,9 +3,9 @@ package resilience
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/sony/gobreaker"
 )
 
@@ -17,7 +17,11 @@ var (
 		MaxRequests: 1,
 		Interval:    0,
 		OnStateChange: func(name string, from, to gobreaker.State) {
-			log.Printf("Circuit Breaker %s changed from %s to %s", name, from, to)
+			log.Info().
+				Str("breaker_name", name).
+				Str("from_state", from.String()).
+				Str("to_state", to.String()).
+				Msg("Circuit Breaker state changed")
 		},
 	})
 
@@ -28,7 +32,11 @@ var (
 		MaxRequests: 1,
 		Interval:    0,
 		OnStateChange: func(name string, from, to gobreaker.State) {
-			log.Printf("Circuit Breaker %s changed from %s to %s", name, from, to)
+			log.Info().
+				Str("breaker_name", name).
+				Str("from_state", from.String()).
+				Str("to_state", to.String()).
+				Msg("Circuit Breaker state changed")
 		},
 	})
 
@@ -39,7 +47,11 @@ var (
 		MaxRequests: 1,
 		Interval:    0,
 		OnStateChange: func(name string, from, to gobreaker.State) {
-			log.Printf("Circuit Breaker %s changed from %s to %s", name, from, to)
+			log.Info().
+				Str("breaker_name", name).
+				Str("from_state", from.String()).
+				Str("to_state", to.String()).
+				Msg("Circuit Breaker state changed")
 		},
 	})
 
@@ -50,26 +62,40 @@ var (
 		MaxRequests: 1,
 		Interval:    0,
 		OnStateChange: func(name string, from, to gobreaker.State) {
-			log.Printf("Circuit Breaker %s changed from %s to %s", name, from, to)
+			log.Info().
+				Str("breaker_name", name).
+				Str("from_state", from.String()).
+				Str("to_state", to.String()).
+				Msg("Circuit Breaker state changed")
 		},
 	})
 )
 
 func ExecuteWithBreaker[T any](ctx context.Context, breaker *gobreaker.CircuitBreaker, name string, fn func() (T, error)) (T, error) {
-	log.Printf("Executing breaker %s", name)
+	log.Debug().
+		Str("breaker_name", name).
+		Msg("Executing breaker")
+
 	result, err := breaker.Execute(func() (interface{}, error) {
 		return fn()
 	})
 	if err != nil {
-		log.Printf("Circuit Breaker %s rejected: %v", name, err)
+		log.Warn().
+			Err(err).
+			Str("breaker_name", name).
+			Msg("Circuit Breaker rejected")
 		var zero T
 		return zero, err
 	}
+
 	val, ok := result.(T)
 	if !ok {
-		log.Printf("Type assertion failed for breaker %s", name)
+		log.Error().
+			Str("breaker_name", name).
+			Msg("Type assertion failed for breaker result")
 		var zero T
 		return zero, fmt.Errorf("type assertion failed")
 	}
+
 	return val, nil
 }

@@ -6,8 +6,9 @@ import (
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog/log"
 )
 
 type transactionRepository struct {
@@ -50,11 +51,12 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 			input.Description,
 		).Scan(&id)
 		if err != nil {
-			return 0, fmt.Errorf("failed to insert transaction: %w", err)
+			return 0, fmt.Errorf("failed to insert transaction (user_id=%d, type=%s): %w", input.UserID, input.Type, err)
 		}
 		return id, nil
 	})
 	if err != nil {
+		log.Warn().Err(err).Int64("user_id", input.UserID).Str("type", input.Type).Msg("Create transaction failed")
 		return 0, err
 	}
 
@@ -76,14 +78,15 @@ func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*do
 			&detail.CreatedAt, &detail.UpdatedAt,
 		)
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("transaction not found")
+			return nil, fmt.Errorf("transaction not found for tx_id=%s", txID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to get transaction: %w", err)
+			return nil, fmt.Errorf("failed to get transaction (tx_id=%s): %w", txID, err)
 		}
 		return &detail, nil
 	})
 	if err != nil {
+		log.Warn().Err(err).Str("tx_id", txID).Msg("GetByTxID failed")
 		return nil, err
 	}
 	return result, nil
@@ -100,14 +103,15 @@ func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64
 	result, err := resilience.ExecuteWithBreaker[*domain.UserBalance](ctx, resilience.PostgresBreaker, "PostgresGetUserBalance", func() (*domain.UserBalance, error) {
 		err := r.db.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("user not found")
+			return nil, fmt.Errorf("user not found for user_id=%d", userID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to get user balance: %w", err)
+			return nil, fmt.Errorf("failed to get user balance (user_id=%d): %w", userID, err)
 		}
 		return &ub, nil
 	})
 	if err != nil {
+		log.Warn().Err(err).Int64("user_id", userID).Msg("GetUserBalance failed")
 		return nil, err
 	}
 	return result, nil
