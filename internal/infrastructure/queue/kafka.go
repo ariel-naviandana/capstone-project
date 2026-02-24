@@ -445,3 +445,7 @@ func CloseKafkaConsumer() {
 		log.Info().Msg("Kafka consumer closed")
 	}
 }
+
+func IsKafkaProducerReady() bool {
+	return kafkaWriter != nil
+}

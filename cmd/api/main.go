@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/application"
 	"github.com/capstone-b4/capstone-go/internal/config"
@@ -22,8 +25,12 @@ func main() {
 	logging.InitLogger()
 
 	config.LoadConfig()
+
 	database.ConnectPostgres()
 	defer database.ClosePostgres()
+
+	database.ConnectMongo()
+	defer database.CloseMongo()
 
 	cache.ConnectRedis()
 	defer cache.CloseRedis()
@@ -71,7 +78,75 @@ func main() {
 	}
 
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		logger := logging.GetLogger(c)
+
+		components := make(map[string]string)
+		overallStatus := "healthy"
+		var errMsg string
+
+		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer pgCancel()
+		if err := database.PostgresPool.Ping(pgCtx); err != nil {
+			components["postgres"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("Postgres down: %v; ", err)
+			logger.Warn().Err(err).Msg("Health check: Postgres down")
+		} else {
+			components["postgres"] = "up"
+		}
+
+		redisCtx, redisCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer redisCancel()
+		if _, err := cache.RedisClient.Ping(redisCtx).Result(); err != nil {
+			components["redis"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("Redis down: %v; ", err)
+			logger.Warn().Err(err).Msg("Health check: Redis down")
+		} else {
+			components["redis"] = "up"
+		}
+
+		kafkaStatus := "up"
+		if !queue.IsKafkaProducerReady() {
+			kafkaStatus = "down"
+			overallStatus = "unhealthy"
+			errMsg += "Kafka producer nil; "
+			logger.Warn().Msg("Health check: Kafka producer nil")
+		}
+		components["kafka"] = kafkaStatus
+
+		mongoCtx, mongoCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer mongoCancel()
+		if err := database.MongoClient.Ping(mongoCtx, nil); err != nil {
+			components["mongo"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("Mongo down: %v; ", err)
+			logger.Warn().Err(err).Msg("Health check: Mongo down")
+		} else {
+			components["mongo"] = "up"
+		}
+
+		response := gin.H{
+			"status":     overallStatus,
+			"components": components,
+		}
+		if errMsg != "" {
+			response["message"] = errMsg
+		}
+
+		logger.Info().
+			Str("overall_status", overallStatus).
+			Interface("components", components).
+			Msg("Health check performed")
+
+		statusCode := http.StatusOK
+		if overallStatus == "unhealthy" {
+			statusCode = http.StatusServiceUnavailable
+		} else if overallStatus == "degraded" {
+			statusCode = http.StatusOK
+		}
+
+		c.JSON(statusCode, response)
 	})
 
 	port := config.AppConfig.ServerPort
