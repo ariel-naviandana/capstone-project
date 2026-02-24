@@ -103,7 +103,16 @@ docker compose up --build -d
 - Backpressure batasi concurrent proses di worker (max 10)
 
 ## Next Step (Ongoing)
-- Prometheus metrics + Grafana dashboard
-- Load test k6 lengkap + SLO report
-- Capacity planning & cloud cost estimation
+- Unit Test (handler, repo, resilience)
+- Autentikasi JWT (login + protect endpoint)
+- Tambah endpoint GET /users/:id/transactions (history tx)
+- CI/CD GitHub Actions (test otomatis)
+- Custom Error Response standar
+- Prometheus Metrics + Grafana Basic
+- Load Testing k6 (peak load + failure sim)
+- Capacity Planning & SLO Report (dari k6)
+- Read/Write Separation Postgres (read replica)
+- Partitioning/Sharding DB
+- Kubernetes Minikube + HPA lokal
+- Cloud Deployment (AWS/GCP)
 ```
