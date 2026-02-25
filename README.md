@@ -115,4 +115,3 @@ docker compose up --build -d
 - Partitioning/Sharding DB
 - Kubernetes Minikube + HPA lokal
 - Cloud Deployment (AWS/GCP)
-```
