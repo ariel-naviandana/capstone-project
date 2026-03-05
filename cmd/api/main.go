@@ -38,7 +38,7 @@ func main() {
 	queue.InitKafkaProducer()
 	defer queue.CloseKafkaProducer()
 
-	txRepo := database.NewTransactionRepository(database.PostgresPool)
+	txRepo := database.NewTransactionRepository(database.WritePool, database.ReadPool)
 	txService := application.NewTransactionService(txRepo)
 	txHandler := handler.NewTransactionHandler(txService)
 
@@ -86,13 +86,24 @@ func main() {
 
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer pgCancel()
-		if err := database.PostgresPool.Ping(pgCtx); err != nil {
-			components["postgres"] = "down"
+		if err := database.WritePool.Ping(pgCtx); err != nil {
+			components["postgres_primary"] = "down"
 			overallStatus = "unhealthy"
-			errMsg += fmt.Sprintf("Postgres down: %v; ", err)
-			logger.Warn().Err(err).Msg("Health check: Postgres down")
+			errMsg += fmt.Sprintf("Postgres Primary down: %v; ", err)
+			logger.Warn().Err(err).Msg("Health check: Postgres Primary down")
 		} else {
-			components["postgres"] = "up"
+			components["postgres_primary"] = "up"
+		}
+
+		pgRepCtx, pgRepCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer pgRepCancel()
+		if err := database.ReadPool.Ping(pgRepCtx); err != nil {
+			components["postgres_replica"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("Postgres Replica down: %v; ", err)
+			logger.Warn().Err(err).Msg("Health check: Postgres Replica down")
+		} else {
+			components["postgres_replica"] = "up"
 		}
 
 		redisCtx, redisCancel := context.WithTimeout(context.Background(), 2*time.Second)

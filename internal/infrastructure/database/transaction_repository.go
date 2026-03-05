@@ -12,11 +12,12 @@ import (
 )
 
 type transactionRepository struct {
-	db *pgxpool.Pool
+	writeDb *pgxpool.Pool
+	readDb  *pgxpool.Pool
 }
 
-func NewTransactionRepository(db *pgxpool.Pool) domain.TransactionRepository {
-	return &transactionRepository{db: db}
+func NewTransactionRepository(writeDb *pgxpool.Pool, readDb *pgxpool.Pool) domain.TransactionRepository {
+	return &transactionRepository{writeDb: writeDb, readDb: readDb}
 }
 
 func (r *transactionRepository) Create(ctx context.Context, input *domain.TransactionCreate) (int64, error) {
@@ -43,7 +44,7 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 	}
 
 	_, err := resilience.ExecuteWithBreaker[int64](ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (int64, error) {
-		err := r.db.QueryRow(ctx, query,
+		err := r.writeDb.QueryRow(ctx, query,
 			input.UserID,
 			recipientID,
 			input.Amount,
@@ -72,7 +73,7 @@ func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*do
 	`
 
 	result, err := resilience.ExecuteWithBreaker[*domain.TransactionDetail](ctx, resilience.PostgresBreaker, "PostgresGetByTxID", func() (*domain.TransactionDetail, error) {
-		err := r.db.QueryRow(ctx, query, txID).Scan(
+		err := r.readDb.QueryRow(ctx, query, txID).Scan(
 			&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
 			&detail.Amount, &detail.Type, &detail.Status,
 			&detail.CreatedAt, &detail.UpdatedAt,
@@ -101,7 +102,7 @@ func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64
 	`
 
 	result, err := resilience.ExecuteWithBreaker[*domain.UserBalance](ctx, resilience.PostgresBreaker, "PostgresGetUserBalance", func() (*domain.UserBalance, error) {
-		err := r.db.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
+		err := r.readDb.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("user not found for user_id=%d", userID)
 		}

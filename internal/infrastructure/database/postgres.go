@@ -9,45 +9,47 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var PostgresPool *pgxpool.Pool
+var WritePool *pgxpool.Pool
+var ReadPool *pgxpool.Pool
 
 func ConnectPostgres() {
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+	primaryDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=10",
 		config.AppConfig.PostgresUser,
 		config.AppConfig.PostgresPassword,
-		config.AppConfig.PostgresHost,
+		"postgres-primary", // mapped in docker-compose
 		config.AppConfig.PostgresPort,
 		config.AppConfig.PostgresDBName,
 	)
 
-	safeDSN := fmt.Sprintf("postgres://%s:***@%s:%s/%s?sslmode=disable",
+	replicaDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=10",
 		config.AppConfig.PostgresUser,
-		config.AppConfig.PostgresHost,
-		config.AppConfig.PostgresPort,
+		config.AppConfig.PostgresPassword,
+		"postgres-replica",            // mapped in docker-compose
+		config.AppConfig.PostgresPort, // internal docker port 5432
 		config.AppConfig.PostgresDBName,
 	)
 
-	log.Debug().
-		Str("safe_dsn", safeDSN).
-		Msg("DSN yang dipakai untuk connect Postgres")
-
-	pool, err := pgxpool.New(context.Background(), dsn)
+	wPool, err := pgxpool.New(context.Background(), primaryDSN)
 	if err != nil {
-		log.Fatal().
-			Err(err).
-			Str("safe_dsn", safeDSN).
-			Msg("Unable to connect to PostgreSQL")
+		log.Fatal().Err(err).Msg("Unable to connect to PostgreSQL Primary")
 	}
+	WritePool = wPool
 
-	PostgresPool = pool
-	log.Info().
-		Str("safe_dsn", safeDSN).
-		Msg("Connected to PostgreSQL with connection pool")
+	rPool, err := pgxpool.New(context.Background(), replicaDSN)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Unable to connect to PostgreSQL Replica")
+	}
+	ReadPool = rPool
+
+	log.Info().Msg("Connected to PostgreSQL Primary and Replica pools")
 }
 
 func ClosePostgres() {
-	if PostgresPool != nil {
-		PostgresPool.Close()
-		log.Info().Msg("PostgreSQL connection closed")
+	if WritePool != nil {
+		WritePool.Close()
 	}
+	if ReadPool != nil {
+		ReadPool.Close()
+	}
+	log.Info().Msg("PostgreSQL connections closed")
 }
