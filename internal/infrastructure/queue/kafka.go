@@ -27,10 +27,12 @@ func InitKafkaProducer() {
 	createTopicIfNotExist(brokers[0], config.AppConfig.KafkaTopic)
 
 	kafkaWriter = &kafka.Writer{
-		Addr:     kafka.TCP(brokers...),
-		Topic:    config.AppConfig.KafkaTopic,
-		Balancer: &kafka.LeastBytes{},
-		Async:    false,
+		Addr:         kafka.TCP(brokers...),
+		Topic:        config.AppConfig.KafkaTopic,
+		Balancer:     &kafka.LeastBytes{},
+		Async:        true,
+		RequiredAcks: kafka.RequireOne,
+		BatchTimeout: 10 * time.Millisecond,
 	}
 
 	log.Info().
@@ -127,7 +129,7 @@ func CloseKafkaProducer() {
 
 var kafkaReader *kafka.Reader
 
-const maxConcurrent = 10
+const maxConcurrent = 100
 
 var processSemaphore = make(chan struct{}, maxConcurrent)
 
@@ -258,155 +260,114 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		resilience.PostgresBreaker,
 		"PostgresProcessTx",
 		func() (struct{}, error) {
-			var existing string
-			err := database.PostgresPool.QueryRow(ctx,
-				"SELECT tx_id FROM transactions WHERE tx_id = $1", event.TxID).Scan(&existing)
-			if err == nil {
-				logger.Info().
-					Str("tx_id", event.TxID).
-					Msg("Tx sudah diproses sebelumnya")
-				return struct{}{}, nil
-			}
-
-			err = resilience.RetryWithBackoff(ctx, func() error {
-				_, err := database.PostgresPool.Exec(ctx,
-					`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())`,
-					event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type)
-				return err
-			}, 3, 500*time.Millisecond)
-
-			if err != nil {
-				logger.Warn().
-					Err(err).
-					Str("tx_id", event.TxID).
-					Msg("Gagal insert pending setelah retry")
-				database.LogToMongo(*event, "failed", "Insert pending gagal setelah retry")
-				return struct{}{}, err
-			}
-
-			var userBalance float64
-			err = resilience.RetryWithBackoff(ctx, func() error {
-				return database.PostgresPool.QueryRow(ctx,
-					"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).Scan(&userBalance)
-			}, 3, 500*time.Millisecond)
-
-			if err != nil {
-				logger.Warn().
-					Err(err).
-					Int64("user_id", event.UserID).
-					Msg("Gagal ambil saldo user setelah retry")
-				database.LogToMongo(*event, "failed", "User not found")
-				return struct{}{}, err
-			}
-
-			var recipientBalance float64
-			if event.Type == "transfer" && event.RecipientID != 0 {
-				err = resilience.RetryWithBackoff(ctx, func() error {
-					return database.PostgresPool.QueryRow(ctx,
-						"SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.RecipientID).Scan(&recipientBalance)
-				}, 3, 500*time.Millisecond)
-
+			return struct{}{}, resilience.RetryWithBackoff(ctx, func() error {
+				txDB, err := database.WritePool.Begin(ctx)
 				if err != nil {
-					logger.Warn().
-						Err(err).
-						Int64("recipient_id", event.RecipientID).
-						Msg("Gagal ambil saldo recipient setelah retry")
-					database.LogToMongo(*event, "failed", "Recipient not found")
-					return struct{}{}, err
-				}
-			}
-
-			switch event.Type {
-			case "deposit":
-				userBalance += event.Amount
-				details = fmt.Sprintf("Deposit +%.2f", event.Amount)
-
-			case "withdraw":
-				if userBalance < event.Amount {
-					newStatus = "failed"
-					details = "Saldo tidak cukup"
-				} else {
-					userBalance -= event.Amount
-					details = fmt.Sprintf("Withdraw -%.2f", event.Amount)
-				}
-
-			case "transfer":
-				if userBalance < event.Amount {
-					newStatus = "failed"
-					details = "Saldo pengirim tidak cukup"
-				} else {
-					userBalance -= event.Amount
-					recipientBalance += event.Amount
-					details = fmt.Sprintf("Transfer %.2f ke user %d", event.Amount, event.RecipientID)
-				}
-
-			default:
-				newStatus = "failed"
-				details = "Type tidak dikenal"
-			}
-
-			txDB, err := database.PostgresPool.Begin(ctx)
-			if err != nil {
-				logger.Warn().
-					Err(err).
-					Msg("Gagal begin tx")
-				return struct{}{}, err
-			}
-			defer txDB.Rollback(ctx)
-
-			err = resilience.RetryWithBackoff(ctx, func() error {
-				_, err := txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2",
-					userBalance, event.UserID)
-				return err
-			}, 3, 500*time.Millisecond)
-			if err != nil {
-				logger.Warn().
-					Err(err).
-					Int64("user_id", event.UserID).
-					Msg("Gagal update balance user setelah retry")
-				return struct{}{}, err
-			}
-
-			if event.Type == "transfer" && event.RecipientID != 0 {
-				err = resilience.RetryWithBackoff(ctx, func() error {
-					_, err := txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2",
-						recipientBalance, event.RecipientID)
 					return err
-				}, 3, 500*time.Millisecond)
-				if err != nil {
-					logger.Warn().
-						Err(err).
-						Int64("recipient_id", event.RecipientID).
-						Msg("Gagal update balance recipient setelah retry")
-					return struct{}{}, err
 				}
-			}
+				defer txDB.Rollback(ctx)
 
-			err = resilience.RetryWithBackoff(ctx, func() error {
-				_, err := txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2",
-					newStatus, event.TxID)
-				return err
-			}, 3, 500*time.Millisecond)
-			if err != nil {
-				logger.Warn().
-					Err(err).
-					Str("tx_id", event.TxID).
-					Msg("Gagal update status setelah retry")
-				return struct{}{}, err
-			}
+				// 1. Deduplication using ON CONFLICT DO NOTHING
+				var insertedTxID string
+				err = txDB.QueryRow(ctx,
+					`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
+					 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
+					 ON CONFLICT (tx_id) DO NOTHING RETURNING tx_id`,
+					event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type).Scan(&insertedTxID)
 
-			err = resilience.RetryWithBackoff(ctx, func() error {
+				if err != nil && err.Error() != "no rows in result set" { // Duplicate tx will return no rows
+					return err
+				}
+
+				if insertedTxID == "" {
+					logger.Info().Str("tx_id", event.TxID).Msg("Tx sudah diproses sebelumnya (duplicate)")
+					return nil // Already processed
+				}
+
+				// 2. Lock Users & Calculate Balances safely
+				var userBalance float64
+				err = txDB.QueryRow(ctx, "SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).Scan(&userBalance)
+				if err != nil {
+					newStatus = "failed"
+					details = "Pengirim tidak ditemukan"
+				}
+
+				var recipientBalance float64
+				if newStatus != "failed" && event.Type == "transfer" && event.RecipientID != 0 {
+					err = txDB.QueryRow(ctx, "SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.RecipientID).Scan(&recipientBalance)
+					if err != nil {
+						newStatus = "failed"
+						details = "Penerima tidak ditemukan"
+					}
+				}
+
+				// 3. Process Logic
+				if newStatus != "failed" {
+					switch event.Type {
+					case "deposit":
+						userBalance += event.Amount
+						details = fmt.Sprintf("Deposit +%.2f", event.Amount)
+
+					case "withdraw":
+						if userBalance < event.Amount {
+							newStatus = "failed"
+							details = "Saldo tidak cukup"
+						} else {
+							userBalance -= event.Amount
+							details = fmt.Sprintf("Withdraw -%.2f", event.Amount)
+						}
+
+					case "transfer":
+						if userBalance < event.Amount {
+							newStatus = "failed"
+							details = "Saldo pengirim tidak cukup"
+						} else {
+							userBalance -= event.Amount
+							recipientBalance += event.Amount
+							details = fmt.Sprintf("Transfer %.2f ke user %d", event.Amount, event.RecipientID)
+						}
+
+					default:
+						newStatus = "failed"
+						details = "Type tidak dikenal"
+					}
+				}
+
+				// 4. Update balances if success
+				if newStatus == "success" {
+					_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", userBalance, event.UserID)
+					if err != nil {
+						return err
+					}
+
+					if event.Type == "transfer" && event.RecipientID != 0 {
+						_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", recipientBalance, event.RecipientID)
+						if err != nil {
+							return err
+						}
+					}
+
+					// Update caching immediately (Write-Through rather than Invalidate)
+					userBalanceObj := domain.UserBalance{Balance: userBalance}
+					cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.UserID), userBalanceObj, 1*time.Minute)
+
+					if event.Type == "transfer" && event.RecipientID != 0 {
+						recipientBalanceObj := domain.UserBalance{Balance: recipientBalance}
+						cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.RecipientID), recipientBalanceObj, 1*time.Minute)
+					}
+				} else {
+					// Fallback for failed transactions
+					database.LogToMongo(*event, newStatus, details)
+				}
+
+				// 5. Update transaction status
+				_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2", newStatus, event.TxID)
+				if err != nil {
+					return err
+				}
+
 				return txDB.Commit(ctx)
 			}, 3, 500*time.Millisecond)
-			if err != nil {
-				logger.Warn().
-					Err(err).
-					Msg("Gagal commit setelah retry")
-				return struct{}{}, err
-			}
-
-			return struct{}{}, nil
 		},
 	)
 
@@ -430,13 +391,6 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 	}
 	cache.SetCache(ctx, cacheKey, finalDetail, 5*time.Minute)
 
-	database.LogToMongo(*event, newStatus, details)
-
-	logger.Info().
-		Str("tx_id", event.TxID).
-		Str("status", newStatus).
-		Str("details", details).
-		Msg("Processed tx")
 }
 
 func CloseKafkaConsumer() {

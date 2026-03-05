@@ -17,6 +17,7 @@ func ConnectRedis() {
 		Addr:     config.AppConfig.RedisAddr,
 		Password: config.AppConfig.RedisPassword,
 		DB:       config.AppConfig.RedisDB,
+		PoolSize: 1000,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -89,6 +90,21 @@ func SetCache(ctx context.Context, key string, value interface{}, ttl time.Durat
 			Str("key", key).
 			Dur("ttl", ttl).
 			Msg("Redis set success")
+	}
+	return err
+}
+
+func InvalidateCache(ctx context.Context, key string) error {
+	err := RedisClient.Del(ctx, key).Err()
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("key", key).
+			Msg("Gagal hapus Redis cache")
+	} else {
+		log.Debug().
+			Str("key", key).
+			Msg("Berhasil invalidasi Redis cache")
 	}
 	return err
 }

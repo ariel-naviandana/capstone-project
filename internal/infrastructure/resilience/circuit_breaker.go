@@ -3,6 +3,7 @@ package resilience
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -46,6 +47,16 @@ var (
 		Timeout:     10 * time.Second,
 		MaxRequests: 1,
 		Interval:    0,
+		IsSuccessful: func(err error) bool {
+			if err == nil {
+				return true
+			}
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no rows") {
+				return true // Business logic errors are not database node failures
+			}
+			return false
+		},
 		OnStateChange: func(name string, from, to gobreaker.State) {
 			log.Info().
 				Str("breaker_name", name).
