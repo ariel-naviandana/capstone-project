@@ -89,7 +89,11 @@ docker compose up --build -d
    - Gunakan k6 load test (lihat bagian Load Test di bawah)
 
 ## Load Test dengan k6
-(akan di-update setelah script selesai)
+Script untuk load testing (Peak Load & Failure Simulation) sudah tersedia di `performance_test.js`.
+Jalankan menggunakan k6:
+```bash
+k6 run performance_test.js
+```
 
 ## SLO Target (Target Capaian)
 - p95 latency < 500ms di normal load
