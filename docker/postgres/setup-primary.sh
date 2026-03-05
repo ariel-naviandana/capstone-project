@@ -1,0 +1,4 @@
+master_host=postgres-primary
+master_user=repuser
+master_password=reppassword
+master_port=5432
