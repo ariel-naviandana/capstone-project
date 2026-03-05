@@ -14,7 +14,7 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 ## Fitur Utama & Resilience
 - Rate limiting per IP/user (Redis)
 - Async processing transaksi via Kafka (producer di API, consumer di Worker)
-- Connection pooling (pgxpool untuk Postgres)
+- Connection pooling (pgxpool untuk Postgres) dengan Read/Write Separation (Master/Replica)
 - Circuit Breaker di semua external call (Kafka producer/consumer, Postgres, Mongo)
 - Retry with exponential backoff untuk transient error
 - Backpressure di Kafka consumer (max 10 concurrent proses event)
@@ -111,7 +111,6 @@ docker compose up --build -d
 - Prometheus Metrics + Grafana Basic
 - Load Testing k6 (peak load + failure sim)
 - Capacity Planning & SLO Report (dari k6)
-- Read/Write Separation Postgres (read replica)
 - Partitioning/Sharding DB
 - Kubernetes Minikube + HPA lokal
 - Cloud Deployment (AWS/GCP)
