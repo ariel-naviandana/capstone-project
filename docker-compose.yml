@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      postgres:
+      postgres-primary:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -28,7 +28,7 @@ services:
     container_name: tx-worker
     restart: always
     depends_on:
-      postgres:
+      postgres-primary:
         condition: service_healthy
       kafka:
         condition: service_healthy
@@ -110,7 +110,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -129,7 +129,7 @@ services:
     volumes:
       - mongo_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -149,7 +149,7 @@ services:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_datalog:/var/lib/zookeeper/log
     healthcheck:
-      test: ["CMD", "zookeeper-shell", "localhost:2181", "ls", "/"]
+      test: [ "CMD", "zookeeper-shell", "localhost:2181", "ls", "/" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -180,14 +180,7 @@ services:
       zookeeper:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD",
-          "kafka-topics",
-          "--bootstrap-server",
-          "localhost:9092",
-          "--list",
-        ]
+      test: [ "CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list" ]
       interval: 10s
       timeout: 5s
       retries: 5

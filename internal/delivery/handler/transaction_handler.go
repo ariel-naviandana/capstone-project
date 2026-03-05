@@ -114,7 +114,7 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 			return
 		}
 
-		if err.Error() == "transaction not found" || strings.Contains(err.Error(), "no rows") {
+		if strings.Contains(err.Error(), "transaction not found") || strings.Contains(err.Error(), "no rows") {
 			logger.Info().
 				Str("tx_id", txID).
 				Msg("Transaction belum ada di DB, masih processing")
@@ -187,7 +187,7 @@ func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
 			return
 		}
 
-		if err.Error() == "user not found" {
+		if strings.Contains(err.Error(), "user not found") {
 			logger.Info().
 				Int64("user_id", userID).
 				Msg("User not found")

@@ -23,11 +23,11 @@ func RateLimiter() gin.HandlerFunc {
 			identifier = "ip:" + c.ClientIP()
 		}
 
-		limit := config.AppConfig.RateLimitRequests
+		limit := 10000 // config.AppConfig.RateLimitRequests
 		windowSec := config.AppConfig.RateLimitWindow
-		if c.FullPath() == "/transactions" && c.Request.Method == "POST" {
-			limit = 50
-		}
+		// if c.FullPath() == "/transactions" && c.Request.Method == "POST" {
+		// 	limit = 50
+		// }
 
 		key := "rate_limit:" + identifier + ":" + c.FullPath()
 
