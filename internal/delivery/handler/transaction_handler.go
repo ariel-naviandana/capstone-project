@@ -43,6 +43,12 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		return
 	}
 
+	if input.Type == "transfer" && input.UserID == input.RecipientID {
+		logger.Warn().Msg("Self-transfer not allowed")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tidak bisa transfer ke diri sendiri"})
+		return
+	}
+
 	txID := uuid.New().String()
 
 	traceID := c.GetString("trace_id")
