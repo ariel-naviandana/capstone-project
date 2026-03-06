@@ -368,12 +368,12 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 					}
 
 					// Update caching immediately (Write-Through rather than Invalidate)
-					userBalanceObj := domain.UserBalance{Balance: userBalance}
-					cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.UserID), userBalanceObj, 1*time.Minute)
+					userAccount.Balance = userBalance
+					cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.UserID), userAccount, 1*time.Minute)
 
 					if event.Type == "transfer" && event.RecipientID != 0 {
-						recipientBalanceObj := domain.UserBalance{Balance: recipientBalance}
-						cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.RecipientID), recipientBalanceObj, 1*time.Minute)
+						recipientAccount.Balance = recipientBalance
+						cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.RecipientID), recipientAccount, 1*time.Minute)
 					}
 				} else {
 					// Fallback for failed transactions
