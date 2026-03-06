@@ -285,21 +285,41 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				}
 
 				// 2. Lock Users & Calculate Balances safely
-				var userBalance float64
-				err = txDB.QueryRow(ctx, "SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).Scan(&userBalance)
-				if err != nil {
-					newStatus = "failed"
-					details = "Pengirim tidak ditemukan"
+				var userAccount domain.UserBalance
+				var recipientAccount domain.UserBalance
+
+				lockUser := func(id int64, account *domain.UserBalance) error {
+					return txDB.QueryRow(ctx, "SELECT id, username, balance FROM users WHERE id = $1 FOR UPDATE", id).
+						Scan(&account.ID, &account.Username, &account.Balance)
 				}
 
-				var recipientBalance float64
-				if newStatus != "failed" && event.Type == "transfer" && event.RecipientID != 0 {
-					err = txDB.QueryRow(ctx, "SELECT balance FROM users WHERE id = $1 FOR UPDATE", event.RecipientID).Scan(&recipientBalance)
+				if event.Type == "transfer" && event.RecipientID != 0 {
+					// Lock lower ID first to prevent deadlocks
+					if event.UserID < event.RecipientID {
+						err = lockUser(event.UserID, &userAccount)
+						if err == nil {
+							err = lockUser(event.RecipientID, &recipientAccount)
+						}
+					} else {
+						err = lockUser(event.RecipientID, &recipientAccount)
+						if err == nil {
+							err = lockUser(event.UserID, &userAccount)
+						}
+					}
 					if err != nil {
 						newStatus = "failed"
-						details = "Penerima tidak ditemukan"
+						details = "Salah satu user tidak ditemukan"
+					}
+				} else {
+					err = lockUser(event.UserID, &userAccount)
+					if err != nil {
+						newStatus = "failed"
+						details = "Pengirim tidak ditemukan"
 					}
 				}
+
+				userBalance := userAccount.Balance
+				recipientBalance := recipientAccount.Balance
 
 				// 3. Process Logic
 				if newStatus != "failed" {
