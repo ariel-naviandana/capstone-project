@@ -288,30 +288,36 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				var userAccount domain.UserBalance
 				var recipientAccount domain.UserBalance
 
-				lockUser := func(id int64, account *domain.UserBalance) error {
-					return txDB.QueryRow(ctx, "SELECT id, username, balance FROM users WHERE id = $1 FOR UPDATE", id).
-						Scan(&account.ID, &account.Username, &account.Balance)
-				}
-
 				if event.Type == "transfer" && event.RecipientID != 0 {
-					// Lock lower ID first to prevent deadlocks
-					if event.UserID < event.RecipientID {
-						err = lockUser(event.UserID, &userAccount)
-						if err == nil {
-							err = lockUser(event.RecipientID, &recipientAccount)
+					rows, err := txDB.Query(ctx, "SELECT id, username, balance FROM users WHERE id IN ($1, $2) FOR UPDATE", event.UserID, event.RecipientID)
+					if err != nil {
+						return err
+					}
+					defer rows.Close()
+
+					var foundUser, foundRecipient bool
+					for rows.Next() {
+						var account domain.UserBalance
+						if err := rows.Scan(&account.ID, &account.Username, &account.Balance); err != nil {
+							continue
 						}
-					} else {
-						err = lockUser(event.RecipientID, &recipientAccount)
-						if err == nil {
-							err = lockUser(event.UserID, &userAccount)
+						if account.ID == event.UserID {
+							userAccount = account
+							foundUser = true
+						} else if account.ID == event.RecipientID {
+							recipientAccount = account
+							foundRecipient = true
 						}
 					}
-					if err != nil {
+					rows.Close()
+
+					if !foundUser || !foundRecipient {
 						newStatus = "failed"
 						details = "Salah satu user tidak ditemukan"
 					}
 				} else {
-					err = lockUser(event.UserID, &userAccount)
+					err = txDB.QueryRow(ctx, "SELECT id, username, balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).
+						Scan(&userAccount.ID, &userAccount.Username, &userAccount.Balance)
 					if err != nil {
 						newStatus = "failed"
 						details = "Pengirim tidak ditemukan"
