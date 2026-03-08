@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
@@ -163,7 +164,7 @@ func StartKafkaConsumer() {
 			func() (kafka.Message, error) {
 				retryErr := resilience.RetryWithBackoff(context.Background(), func() error {
 					var innerErr error
-					msg, innerErr = kafkaReader.ReadMessage(context.Background())
+					msg, innerErr = kafkaReader.FetchMessage(context.Background())
 					return innerErr
 				}, 3, 500*time.Millisecond)
 
@@ -174,63 +175,74 @@ func StartKafkaConsumer() {
 		if breakerErr != nil {
 			log.Warn().
 				Err(breakerErr).
-				Msg("Kafka read ditolak breaker, sleep 1s")
+				Msg("Kafka fetch initial message ditolak breaker, sleep 1s")
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		processSemaphore <- struct{}{}
+		batch := []kafka.Message{msg}
 
-		go func(msg kafka.Message) {
-			defer func() { <-processSemaphore }()
-
-			headersLog := make(map[string]string)
-			for _, h := range msg.Headers {
-				headersLog[string(h.Key)] = string(h.Value)
+		// Try to fetch more messages concurrently up to maxConcurrent to build a batch
+		for i := 1; i < maxConcurrent; i++ {
+			fetchCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+			m, fetchErr := kafkaReader.FetchMessage(fetchCtx)
+			cancel()
+			if fetchErr != nil {
+				break
 			}
+			batch = append(batch, m)
+		}
 
-			eventLogger := log.With().
-				Interface("kafka_headers_received", headersLog).
-				Logger()
+		var wg sync.WaitGroup
+		for _, batchMsg := range batch {
+			wg.Add(1)
+			go func(m kafka.Message) {
+				defer wg.Done()
 
-			eventLogger.Debug().Msg("All Kafka headers received")
-
-			var traceID string
-			for _, h := range msg.Headers {
-				if string(h.Key) == "trace_id" {
-					traceID = string(h.Value)
-					break
+				headersLog := make(map[string]string)
+				for _, h := range m.Headers {
+					headersLog[string(h.Key)] = string(h.Value)
 				}
-			}
 
-			if traceID == "" {
-				traceID = "unknown-" + time.Now().Format("20060102-150405")
-			}
+				eventLogger := log.With().
+					Interface("kafka_headers_received", headersLog).
+					Logger()
 
-			eventLogger = eventLogger.With().Str("trace_id", traceID).Logger()
+				var traceID string
+				for _, h := range m.Headers {
+					if string(h.Key) == "trace_id" {
+						traceID = string(h.Value)
+						break
+					}
+				}
 
-			var event domain.KafkaTransactionEvent
-			if err := json.Unmarshal(msg.Value, &event); err != nil {
-				eventLogger.Error().
-					Err(err).
-					Msg("Error unmarshal Kafka message")
-				return
-			}
+				if traceID == "" {
+					traceID = "unknown-" + time.Now().Format("20060102-150405")
+				}
 
-			eventLogger.Info().
-				Str("tx_id", event.TxID).
-				Str("type", event.Type).
-				Int("concurrent", maxConcurrent-len(processSemaphore)).
-				Msg("Received event")
+				eventLogger = eventLogger.With().Str("trace_id", traceID).Logger()
 
-			processTransactionEvent(&event, eventLogger)
+				var event domain.KafkaTransactionEvent
+				if err := json.Unmarshal(m.Value, &event); err != nil {
+					eventLogger.Error().
+						Err(err).
+						Msg("Error unmarshal Kafka message")
+					return
+				}
 
-			if err := kafkaReader.CommitMessages(context.Background(), msg); err != nil {
-				eventLogger.Warn().
-					Err(err).
-					Msg("Gagal commit offset")
-			}
-		}(msg)
+				processTransactionEvent(&event, eventLogger)
+			}(batchMsg)
+		}
+
+		// Wait for all messages in the batch to process completely
+		wg.Wait()
+
+		// ONLY commit offsets synchronously after the entire batch processes successfully
+		if err := kafkaReader.CommitMessages(context.Background(), batch...); err != nil {
+			log.Warn().
+				Err(err).
+				Msg("Gagal sinkronisasi commit offset kafka batch")
+		}
 	}
 }
 
