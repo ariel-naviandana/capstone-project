@@ -7,7 +7,7 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 - **Database**: PostgreSQL (transaksi utama) + MongoDB (logging & data fleksibel)
 - **Caching & Rate Limiting**: Redis
 - **Message Queue**: Kafka (Confluent)
-- **Resilience**: Circuit Breaker (gobreaker), Retry with Backoff, Backpressure (semaphore)
+- **Resilience**: Circuit Breaker (gobreaker), Retry with Backoff, Batch Processing
 - **Logging & Observability**: Zerolog (structured JSON) + Trace ID propagation
 - **Deployment**: Docker + Docker Compose (monorepo: API + Worker)
 
@@ -17,10 +17,75 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 - Connection pooling (pgxpool untuk Postgres) dengan Read/Write Separation (Master/Replica)
 - Circuit Breaker di semua external call (Kafka producer/consumer, Postgres, Mongo)
 - Retry with exponential backoff untuk transient error
-- Backpressure di Kafka consumer (max 10 concurrent proses event)
+- Batch processing di Kafka consumer (max 100 concurrent proses event per batch)
 - Structured logging (zerolog JSON) di seluruh flow
 - Trace ID propagation: dari API request → Kafka header → Worker proses event
 - Caching balance & transaction status di Redis
+
+## Arsitektur Sistem
+
+```mermaid
+flowchart TB
+    Client([Client User/Service]) -->|HTTP REST/JSON| API
+
+    subgraph "API Node (Gin Gonic)"
+        API[API Server]
+        MiddlewareLayer[Middleware Layer<br/>RateLimit, TraceID]
+        TxHandler[Transaction Handler]
+        
+        API --> MiddlewareLayer
+        MiddlewareLayer --> TxHandler
+    end
+
+    subgraph "Caching & Rate Limiting"
+        Redis[(Redis 7)]
+        MiddlewareLayer -->|1. Check/Set IP Limit<br/>CircuitBreaker| Redis
+        TxHandler -.->|"Cache Read/Miss<br/>(Get Tx/Balance)"| Redis
+    end
+
+    subgraph "Message Queue Layer (Confluent)"
+        KafkaBroker[(Kafka 7.6.1<br/>Topic: transactions)]
+        TxHandler -->|2. Async Publish Event<br/>+ TraceID Header<br/>CircuitBreaker| KafkaBroker
+    end
+
+    subgraph "Worker Node (Background Processor)"
+        Worker[Kafka Consumer Worker]
+        BatchProcessor[Batch Processor<br/>Max 100/batch]
+        PostgresTxDB{DB Tx Manager}
+        
+        KafkaBroker -->|3. Consume Batch<br/>CircuitBreaker| Worker
+        Worker --> BatchProcessor
+        BatchProcessor --> PostgresTxDB
+    end
+
+    subgraph "Database Layer"
+        PG_Primary[(PostgreSQL 18 Master<br/>Write Pool)]
+        PG_Replica[(PostgreSQL 18 Replica<br/>Read Pool)]
+        Mongo[(MongoDB 7<br/>Fallback Logs)]
+        
+        PG_Primary -.->|Wal Replication| PG_Replica
+    end
+
+    %% Worker to Data Layer interactions
+    PostgresTxDB -->|4. Update Balance/Status<br/>ON CONFLICT Deduplication<br/>CircuitBreaker| PG_Primary
+    PostgresTxDB -.->|Write-Through Cache| Redis
+    PostgresTxDB -->|5. Log Failed Tx<br/>CircuitBreaker| Mongo
+
+    %% Read Operations from API
+    TxHandler -->|Read Balance/Get Tx<br/>CircuitBreaker| PG_Replica
+
+    %% Observability noting
+    classDef observer fill:#e6f2ff,stroke:#3388ff,stroke-dasharray: 5 5;
+    classDef primary fill:#ffe6e6,stroke:#ff3333;
+    classDef cache fill:#e6ffe6,stroke:#33cc33;
+    classDef worker fill:#fff2e6,stroke:#ff9933;
+    
+    class MiddlewareLayer observer;
+    class PG_Primary primary;
+    class Worker,BatchProcessor worker;
+    class Redis cache;
+    class KafkaBroker cache;
+```
 
 ## Struktur Proyek
 ```
@@ -104,7 +169,7 @@ k6 run performance_test.js
 ## Catatan Pengembangan
 - Logging sekarang full zerolog JSON + trace ID propagation
 - Semua external call dilindungi breaker + retry
-- Backpressure batasi concurrent proses di worker (max 10)
+- Batch processing batasi concurrent proses di worker (max 100 per batch)
 
 ## Next Step (Ongoing)
 - Unit Test (handler, repo, resilience)
