@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
@@ -110,61 +111,38 @@ func InvalidateCache(ctx context.Context, key string) error {
 }
 
 func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) (int, error) {
-	pipe := RedisClient.Pipeline()
-	incrCmd := pipe.Incr(ctx, key)
-	expireCmd := pipe.Expire(ctx, key, expiry)
+	script := `
+		local current = redis.call("INCR", KEYS[1])
+		if current == 1 then
+			redis.call("EXPIRE", KEYS[1], ARGV[1])
+		end
+		return current
+	`
 
-	_, err := pipe.Exec(ctx)
+	expirySeconds := int(expiry.Seconds())
+	if expirySeconds <= 0 {
+		expirySeconds = 1 // Prevent 0 or negative expiry
+	}
+
+	result, err := RedisClient.Eval(ctx, script, []string{key}, expirySeconds).Result()
 	if err != nil {
 		log.Warn().
 			Err(err).
 			Str("key", key).
-			Msg("Redis pipeline error in IncrementWithExpiry")
+			Msg("Gagal eksekusi Redis Lua script untuk IncrementWithExpiry")
 		return 0, err
 	}
 
-	count, err := incrCmd.Result()
-	if err != nil {
-		log.Warn().
-			Err(err).
+	count, ok := result.(int64)
+	if !ok {
+		errType := fmt.Errorf("unexpected result type: %T", result)
+		log.Error().
+			Err(errType).
 			Str("key", key).
-			Msg("Gagal increment Redis key")
-		return 0, err
-	}
-
-	_, err = expireCmd.Result()
-	if err != nil {
-		log.Warn().
-			Err(err).
-			Str("key", key).
-			Dur("expiry", expiry).
-			Msg("Expire failed for Redis key")
+			Interface("result", result).
+			Msg("Tipe hasil tak terduga dari Redis Lua script")
+		return 0, errType
 	}
 
 	return int(count), nil
-}
-
-func GetRateLimitStatus(ctx context.Context, key string) (int, time.Duration, error) {
-	count, err := RedisClient.Get(ctx, key).Int()
-	if err == redis.Nil {
-		return 0, 0, nil
-	}
-	if err != nil {
-		log.Warn().
-			Err(err).
-			Str("key", key).
-			Msg("Redis get error in GetRateLimitStatus")
-		return 0, 0, err
-	}
-
-	ttl, err := RedisClient.TTL(ctx, key).Result()
-	if err != nil {
-		log.Warn().
-			Err(err).
-			Str("key", key).
-			Msg("Redis TTL error in GetRateLimitStatus")
-		return count, 0, err
-	}
-
-	return count, ttl, nil
 }
