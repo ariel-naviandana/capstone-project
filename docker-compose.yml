@@ -59,6 +59,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 30s
     networks:
       - app-network
 
@@ -75,9 +76,9 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-capstone123}
     command: >
-      bash -c "
+      bash -e -c "
         echo 'Starting replica sync...';
-        until pg_isready -h postgres-primary -U postgres; do
+        until pg_isready -h postgres-primary -U ${POSTGRES_USER:-postgres}; do
           sleep 2;
         done;
         if [ -z \"\$(ls -A $$PGDATA)\" ]; then
@@ -95,9 +96,10 @@ services:
       - postgres_replica_data:/var/lib/postgresql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-capstone}" ]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 120s
     networks:
       - app-network
 
