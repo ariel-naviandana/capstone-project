@@ -11,8 +11,7 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 - **Logging & Observability**: Zerolog (structured JSON) + Trace ID propagation
 - **Deployment**: Docker + Docker Compose (monorepo: API + Worker)
 
-## Arsitektur Sistem
-<img width="826" height="1586" alt="Screenshot 2026-03-09 060458" src="https://github.com/user-attachments/assets/263416f8-a721-465d-ac42-b77c3b3f13d3" />
+## Arsitektur Sistem Flow
 <img width="2459" height="1135" alt="Screenshot 2026-03-08 070253" src="https://github.com/user-attachments/assets/662fb9da-0eff-4ee0-bd13-4a5983fe3695" />
 <img width="2407" height="1051" alt="Screenshot 2026-03-08 072751" src="https://github.com/user-attachments/assets/8fdef6b8-9d5e-4433-8ebd-2289beb985d4" />
 <img width="2414" height="1063" alt="Screenshot 2026-03-08 073817" src="https://github.com/user-attachments/assets/61c639ff-dfd0-4bc5-93ad-79f34b22cd9b" />
