@@ -32,13 +32,13 @@ CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
 CREATE INDEX IF NOT EXISTS idx_transactions_tx_id ON transactions(tx_id);
 
--- Insert 10000 dummy users
+-- Insert 100000 dummy users
 INSERT INTO users (username, email, balance)
 SELECT 
     'user' || i, 
     'user' || i || '@example.com', 
     100000.0
-FROM generate_series(1, 10000) AS i
+FROM generate_series(1, 100000) AS i
 ON CONFLICT (username) DO NOTHING;
 
 -- Insert dummy transactions (CARA 1: INSERT satu per satu - PALING AMAN)

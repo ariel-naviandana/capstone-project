@@ -42,30 +42,25 @@ func LoadConfig() {
 
 	viper.AutomaticEnv()
 
+	// Set Default Values
 	viper.SetDefault("SERVER_PORT", "8000")
-	viper.BindEnv("SERVER_PORT")
-
-	viper.BindEnv("POSTGRES_HOST")
-	viper.BindEnv("POSTGRES_PORT")
-	viper.BindEnv("POSTGRES_USER")
-	viper.BindEnv("POSTGRES_PASSWORD")
-	viper.BindEnv("POSTGRES_DB")
-
-	viper.BindEnv("KAFKA_BROKERS")
-	viper.BindEnv("KAFKA_TOPIC")
-	viper.BindEnv("KAFKA_GROUP_ID")
-	viper.BindEnv("MONGO_URI")
-
-	viper.BindEnv("REDIS_ADDR")
-	viper.BindEnv("REDIS_PASSWORD")
-	viper.BindEnv("REDIS_DB")
-
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 100)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
-	viper.BindEnv("RATE_LIMIT_REQUESTS")
-	viper.BindEnv("RATE_LIMIT_WINDOW")
 
-	viper.BindEnv("LOG_INFO")
+	// Bind Environment Variables for Viper Unmarshal
+	_ = viper.BindEnv("POSTGRES_HOST")
+	_ = viper.BindEnv("POSTGRES_PORT")
+	_ = viper.BindEnv("POSTGRES_USER")
+	_ = viper.BindEnv("POSTGRES_PASSWORD")
+	_ = viper.BindEnv("POSTGRES_DB")
+	_ = viper.BindEnv("KAFKA_BROKERS")
+	_ = viper.BindEnv("KAFKA_TOPIC")
+	_ = viper.BindEnv("KAFKA_GROUP_ID")
+	_ = viper.BindEnv("MONGO_URI")
+	_ = viper.BindEnv("REDIS_ADDR")
+	_ = viper.BindEnv("REDIS_PASSWORD")
+	_ = viper.BindEnv("REDIS_DB")
+	_ = viper.BindEnv("LOG_INFO")
 
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		log.Fatal().Err(err).Msg("Config unmarshal error")
