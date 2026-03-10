@@ -8,7 +8,7 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 - **Caching & Rate Limiting**: Redis
 - **Message Queue**: Kafka (Confluent)
 - **Resilience**: Circuit Breaker (gobreaker), Retry with Backoff, Batch Processing
-- **Logging & Observability**: Zerolog (structured JSON) + Trace ID propagation
+- **Logging & Observability**: Zerolog (structured JSON) + Trace ID propagation + Prometheus metrics + Grafana dashboard
 - **Deployment**: Docker + Docker Compose (monorepo: API + Worker)
 
 ## Arsitektur Sistem Flow
@@ -27,6 +27,7 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 - Structured logging (zerolog JSON) di seluruh flow
 - Trace ID propagation: dari API request → Kafka header → Worker proses event
 - Caching balance & transaction status di Redis
+- Observability via Prometheus metrics (Gin requests, custom breaker/cache) + Grafana dashboard real-time (RPS, p95 latency dengan threshold SLO, error rate, breaker state/trips, cache hit rate)
 
 ## Arsitektur Sistem
 
@@ -166,16 +167,37 @@ Jalankan menggunakan k6:
 k6 run performance_test.js
 ```
 
+## Observability & SLO Dashboard (Grafana)
+- Prometheus scrape metrics dari endpoint `/metrics` di API
+- Grafana tampilkan real-time:
+  - Requests per Second (RPS)
+  - Latency p95 (threshold red >500ms untuk SLO breach)
+  - Error Rate (%)
+  - Circuit Breaker State & Trips Count
+  - Cache Hit Rate (%)
+
+Cara akses:
+1. Buka http://localhost:3000
+2. Login: capstone / admin123 (ganti password setelah login)
+3. Dashboards → New → Import → upload `grafana-dashboard.json` di root proyek
+4. Pilih datasource Prometheus (URL: http://prometheus:9090)
+5. Import → dashboard langsung muncul
+6. Refresh dashboard saat test k6 → lihat RPS naik, latency spike, cache hit rate tinggi
+
+Dashboard di-export ke `grafana-dashboard.json` supaya bisa di-import ulang di mesin lain.
+
 ## SLO Target (Target Capaian)
 - p95 latency < 500ms di normal load
 - Error rate < 1% saat overload/failure
 - Breaker aktif proteksi sistem (fast fail 503)
 - Trace ID konsisten end-to-end
+- Cache hit rate >80% pada read-heavy workload
 
 ## Catatan Pengembangan
 - Logging sekarang full zerolog JSON + trace ID propagation
 - Semua external call dilindungi breaker + retry
 - Batch processing batasi concurrent proses di worker (max 100 per batch)
+- Observability menggunakan Prometheus + Grafana untuk monitor RPS, latency, error, breaker, cache secara real-time
 
 ## Next Step (Ongoing)
 - Unit Test (handler, repo, resilience)
@@ -183,8 +205,6 @@ k6 run performance_test.js
 - Tambah endpoint GET /users/:id/transactions (history tx)
 - CI/CD GitHub Actions (test otomatis)
 - Custom Error Response standar
-- Prometheus Metrics + Grafana Basic
-- Load Testing k6 (peak load + failure sim)
 - Capacity Planning & SLO Report (dari k6)
 - Partitioning/Sharding DB
 - Kubernetes Minikube + HPA lokal

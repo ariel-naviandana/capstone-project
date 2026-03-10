@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
@@ -47,6 +48,7 @@ func CloseRedis() {
 func GetCached[T any](ctx context.Context, key string) (*T, bool) {
 	val, err := RedisClient.Get(ctx, key).Result()
 	if err == redis.Nil {
+		observability.CacheMissesTotal.WithLabelValues("redis").Inc()
 		return nil, false
 	}
 	if err != nil {
@@ -54,8 +56,11 @@ func GetCached[T any](ctx context.Context, key string) (*T, bool) {
 			Err(err).
 			Str("key", key).
 			Msg("Redis get error")
+		observability.CacheMissesTotal.WithLabelValues("redis").Inc()
 		return nil, false
 	}
+
+	observability.CacheHitsTotal.WithLabelValues("redis").Inc()
 
 	var data T
 	if err := json.Unmarshal([]byte(val), &data); err != nil {
