@@ -10,6 +10,7 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 - **Resilience**: Circuit Breaker (gobreaker), Retry with Backoff, Batch Processing
 - **Logging & Observability**: Zerolog (structured JSON) + Trace ID propagation + Prometheus metrics + Grafana dashboard
 - **Deployment**: Docker + Docker Compose (monorepo: API + Worker)
+- **Load & Chaos Testing**: k6 (performance_test.js & chaos_test.js di folder tests/k6/)
 
 ## Arsitektur Sistem Flow
 <img width="2459" height="1135" alt="Screenshot 2026-03-08 070253" src="https://github.com/user-attachments/assets/662fb9da-0eff-4ee0-bd13-4a5983fe3695" />
@@ -142,10 +143,12 @@ docker compose up --build -d
 
 - API: http://localhost:8000
 - Worker: berjalan di background, consume Kafka
-- Postgres: localhost:5432
-- Mongo: localhost:27017
-- Redis: localhost:6379
-- Kafka: localhost:9092
+- Postgres: http://localhost:5432
+- Mongo: http://localhost:27017
+- Redis: http://localhost:6379
+- Kafka: http://localhost:9092
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000
 
 ## Cara Tes Resilience & Observability
 1. **Normal flow**:
@@ -160,11 +163,36 @@ docker compose up --build -d
 3. **Simulasi overload**:
    - Gunakan k6 load test (lihat bagian Load Test di bawah)
 
-## Load Test dengan k6
-Script untuk load testing (Peak Load & Failure Simulation) sudah tersedia di `performance_test.js`.
-Jalankan menggunakan k6:
+## Load & Chaos Testing dengan k6
+
+Script testing berada di folder `tests/k6/`:
+
+- `performance_test.js`: Load test normal (smoke, load, stress, spike, soak)
+- `chaos_test.js`: Simulasi failure (Postgres/Redis/Kafka down)
+
+Cara jalankan (dari root proyek):
+
 ```bash
-k6 run performance_test.js
+# Performance test
+k6 run tests/k6/performance_test.js
+```
+```bash
+# Chaos test postgre primary down
+docker stop tx-postgre-primary
+k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=postgres
+docker start tx-postgre-primary
+```
+```bash
+# Chaos test redis down
+docker stop tx-redis
+k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=redis
+docker start tx-redis
+```
+```bash
+# Chaos test kafka down
+docker stop tx-kafka
+k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=kafka
+docker start tx-kafka
 ```
 
 ## Observability & SLO Dashboard (Grafana)
