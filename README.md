@@ -194,6 +194,9 @@ docker stop tx-kafka
 k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=kafka
 docker start tx-kafka
 ```
+K6 Testing Result
+
+https://docs.google.com/spreadsheets/d/1MeOlugkW6gw524ed3eTZDOFPl-spz2XyKEeltw5GJrA/edit?usp=sharing
 
 ## Observability & SLO Dashboard (Grafana)
 - Prometheus scrape metrics dari endpoint `/metrics` di API
