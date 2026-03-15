@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s  # seberapa sering scrape metrics dari target
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'api'
+    static_configs:
+      - targets: ['api:8000']  # nama service api di docker-compose, port internal 8000
+
+  - job_name: 'go_runtime'
+    static_configs:
+      - targets: ['api:8000']  # bisa scrape metrics Go runtime juga

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/rs/zerolog/log"
 	"github.com/sony/gobreaker"
 )
@@ -53,11 +54,20 @@ var (
 			}
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no rows") {
-				return true // Business logic errors are not database node failures
+				return true
 			}
 			return false
 		},
 		OnStateChange: func(name string, from, to gobreaker.State) {
+			state := 0.0
+			if to == gobreaker.StateOpen {
+				state = 1.0
+				observability.BreakerTripsTotal.WithLabelValues(name).Inc()
+			} else if to == gobreaker.StateHalfOpen {
+				state = 2.0
+			}
+			observability.BreakerState.WithLabelValues(name).Set(state)
+
 			log.Info().
 				Str("breaker_name", name).
 				Str("from_state", from.String()).
