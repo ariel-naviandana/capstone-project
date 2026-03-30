@@ -43,7 +43,20 @@ services:
     image: postgres:18
     container_name: tx-postgres-primary
     restart: always
-    command: [ "postgres", "-c", "max_connections=200", "-c", "shared_buffers=256MB", "-c", "synchronous_commit=off", "-c", "wal_buffers=16MB", "-c", "checkpoint_timeout=15min" ]
+    command:
+      [
+        "postgres",
+        "-c",
+        "max_connections=200",
+        "-c",
+        "shared_buffers=256MB",
+        "-c",
+        "synchronous_commit=off",
+        "-c",
+        "wal_buffers=16MB",
+        "-c",
+        "checkpoint_timeout=15min",
+      ]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-capstone}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -55,7 +68,11 @@ services:
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01_init.sql
       - ./docker/postgres/init-primary.sh:/docker-entrypoint-initdb.d/02_init-primary.sh
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-capstone}" ]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-capstone}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -95,7 +112,11 @@ services:
     volumes:
       - postgres_replica_data:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-capstone}" ]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-capstone}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -112,7 +133,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -131,7 +152,7 @@ services:
     volumes:
       - mongo_data:/data/db
     healthcheck:
-      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -151,7 +172,7 @@ services:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_datalog:/var/lib/zookeeper/log
     healthcheck:
-      test: [ "CMD", "zookeeper-shell", "localhost:2181", "ls", "/" ]
+      test: ["CMD", "zookeeper-shell", "localhost:2181", "ls", "/"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -174,7 +195,7 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: 3
     volumes:
       - kafka_data:/var/lib/kafka/data
@@ -182,12 +203,62 @@ services:
       zookeeper:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list" ]
+      test:
+        [
+          "CMD",
+          "kafka-topics",
+          "--bootstrap-server",
+          "localhost:9092",
+          "--list",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - app-network
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus
+    restart: always
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - app-network
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=capstone
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   app-network:
@@ -201,3 +272,5 @@ volumes:
   zookeeper_data:
   zookeeper_datalog:
   kafka_data:
+  prometheus_data:
+  grafana_data:

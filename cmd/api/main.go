@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/application"
@@ -13,13 +14,40 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
+	_ "github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 )
+
+var (
+	requestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "Duration of HTTP requests in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path", "status"},
+	)
+
+	requestTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"method", "path", "status"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(requestDuration)
+	prometheus.MustRegister(requestTotal)
+}
 
 func main() {
 	logging.InitLogger()
@@ -43,6 +71,20 @@ func main() {
 	txHandler := handler.NewTransactionHandler(txService)
 
 	r := gin.Default()
+
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		method := c.Request.Method
+		path := c.FullPath()
+
+		c.Next()
+
+		duration := time.Since(start).Seconds()
+		status := strconv.Itoa(c.Writer.Status())
+
+		requestDuration.WithLabelValues(method, path, status).Observe(duration)
+		requestTotal.WithLabelValues(method, path, status).Inc()
+	})
 
 	r.Use(requestid.New())
 
@@ -169,6 +211,8 @@ func main() {
 	log.Info().
 		Str("port", port).
 		Msg("Server starting on :" + port)
+
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	if err := r.Run(":" + port); err != nil {
 		log.Fatal().Err(err).Msg("Failed to start server")
