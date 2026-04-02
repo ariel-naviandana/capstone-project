@@ -94,10 +94,25 @@ func main() {
 
 	r.Use(requestid.New())
 
+	// Inisialisasi Asynchronous UUID Pre-Generator Pool untuk ultra-low latency
+	uuidPool := make(chan string, 10000)
+	for i := 0; i < 3; i++ { // 3 Worker mempercepat pengisian
+		go func() {
+			for {
+				uuidPool <- uuid.New().String()
+			}
+		}()
+	}
+
 	r.Use(func(c *gin.Context) {
 		reqID := requestid.Get(c)
 		if reqID == "" {
-			reqID = uuid.New().String()
+			select {
+			case reqID = <-uuidPool:
+			default:
+				// Fallback jika semua worker uuid sibuk dan antrean pool kosong
+				reqID = uuid.New().String()
+			}
 		}
 
 		log.Debug().
