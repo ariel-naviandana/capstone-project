@@ -7,16 +7,18 @@ import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 const transactionLatency = new Trend('tx_latency', true);
 const balanceLatency = new Trend('balance_latency', true);
 const errorRate = new Rate('errors');
-const validTxCounter = new Counter('valid_tps');
+const validReqCounter = new Counter('valid_requests');
 const shieldedTxCounter = new Counter('shielded_tps');
 
 function handleResult(success, res) {
     if (success) {
-        validTxCounter.add(1);
+        validReqCounter.add(1);
+        errorRate.add(false);
     } else if (res.status === 503 || res.status === 429) {
         shieldedTxCounter.add(1); // Ditangkis pertahanan (Bukan error aplikasi)
+        errorRate.add(false);
     } else {
-        errorRate.add(1); // Error murni (500, EOF, Timeout)
+        errorRate.add(true); // Error murni (500, EOF, Timeout)
     }
 }
 
