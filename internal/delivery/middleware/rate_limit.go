@@ -23,15 +23,12 @@ func RateLimiter() gin.HandlerFunc {
 			identifier = "ip:" + c.ClientIP()
 		}
 
-		limit := 10000 // config.AppConfig.RateLimitRequests
+		limit := config.AppConfig.RateLimitRequests
 		windowSec := config.AppConfig.RateLimitWindow
-		// if c.FullPath() == "/transactions" && c.Request.Method == "POST" {
-		// 	limit = 50
-		// }
 
 		key := "rate_limit:" + identifier + ":" + c.FullPath()
 
-		count, err := cache.IncrementWithExpiry(c.Request.Context(), key, time.Duration(windowSec)*time.Second)
+		count, ttlSeconds, err := cache.IncrementWithExpiry(c.Request.Context(), key, time.Duration(windowSec)*time.Second)
 		if err != nil {
 			logger.Warn().
 				Err(err).
@@ -45,8 +42,7 @@ func RateLimiter() gin.HandlerFunc {
 
 		c.Header("X-RateLimit-Limit", strconv.Itoa(limit))
 		c.Header("X-RateLimit-Remaining", strconv.Itoa(limit-count))
-		ttl, _ := cache.RedisClient.TTL(c.Request.Context(), key).Result()
-		resetTime := time.Now().Add(ttl).Unix()
+		resetTime := time.Now().Add(time.Duration(ttlSeconds) * time.Second).Unix()
 		c.Header("X-RateLimit-Reset", strconv.FormatInt(resetTime, 10))
 		c.Header("X-RateLimit-Window", strconv.Itoa(windowSec))
 
@@ -61,7 +57,7 @@ func RateLimiter() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error":       "Too many requests",
 				"message":     "Anda telah mencapai batas request, silakan coba lagi nanti",
-				"retry_after": int(ttl.Seconds()),
+				"retry_after": ttlSeconds,
 				"identifier":  identifier,
 			})
 			return
