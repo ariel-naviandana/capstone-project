@@ -70,7 +70,13 @@ func main() {
 	txService := application.NewTransactionService(txRepo)
 	txHandler := handler.NewTransactionHandler(txService)
 
-	r := gin.Default()
+	// Menggunakan gin.New() tanpa Logger bawaan untuk meminimalisasi CPU blocking I/O di terminal
+	r := gin.New()
+	r.Use(gin.Recovery())
+
+	// Melindungi container dari goroutine leak saat DDOS (Limit 100 request concurrent / fail-fast)
+	middleware.InitDDosShield(100)
+	r.Use(middleware.DDosShield())
 
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
