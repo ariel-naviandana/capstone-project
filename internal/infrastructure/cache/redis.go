@@ -115,13 +115,14 @@ func InvalidateCache(ctx context.Context, key string) error {
 	return err
 }
 
-func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) (int, error) {
+func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) (int, int, error) {
 	script := `
 		local current = redis.call("INCR", KEYS[1])
 		if current == 1 then
 			redis.call("EXPIRE", KEYS[1], ARGV[1])
 		end
-		return current
+		local ttl = redis.call("TTL", KEYS[1])
+		return {current, ttl}
 	`
 
 	expirySeconds := int(expiry.Seconds())
@@ -135,19 +136,22 @@ func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) 
 			Err(err).
 			Str("key", key).
 			Msg("Gagal eksekusi Redis Lua script untuk IncrementWithExpiry")
-		return 0, err
+		return 0, 0, err
 	}
 
-	count, ok := result.(int64)
-	if !ok {
+	arr, ok := result.([]interface{})
+	if !ok || len(arr) != 2 {
 		errType := fmt.Errorf("unexpected result type: %T", result)
 		log.Error().
 			Err(errType).
 			Str("key", key).
 			Interface("result", result).
 			Msg("Tipe hasil tak terduga dari Redis Lua script")
-		return 0, errType
+		return 0, 0, errType
 	}
 
-	return int(count), nil
+	count := int(arr[0].(int64))
+	ttl := int(arr[1].(int64))
+
+	return count, ttl, nil
 }
