@@ -4,7 +4,7 @@ COPY go.mod go.sum ./
 ENV GOPROXY=https://goproxy.cn,direct
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o worker ./cmd/worker/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o worker ./cmd/worker/main.go
 
 FROM alpine:latest
 WORKDIR /root/
