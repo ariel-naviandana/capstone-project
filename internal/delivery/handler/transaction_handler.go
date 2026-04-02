@@ -209,7 +209,7 @@ func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
 		return
 	}
 
-	cache.SetCache(c.Request.Context(), cacheKey, balance, 1*time.Minute)
+	cache.SetCache(c.Request.Context(), cacheKey, balance, 10*time.Minute)
 
 	logger.Info().
 		Int64("user_id", userID).

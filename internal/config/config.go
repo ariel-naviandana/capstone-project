@@ -44,7 +44,7 @@ func LoadConfig() {
 
 	// Set Default Values
 	viper.SetDefault("SERVER_PORT", "8000")
-	viper.SetDefault("RATE_LIMIT_REQUESTS", 100)
+	viper.SetDefault("RATE_LIMIT_REQUESTS", 25000)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
 
 	// Bind Environment Variables for Viper Unmarshal
