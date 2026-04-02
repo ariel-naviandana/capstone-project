@@ -150,8 +150,20 @@ func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) 
 		return 0, 0, errType
 	}
 
-	count := int(arr[0].(int64))
-	ttl := int(arr[1].(int64))
+	countInt64, ok1 := arr[0].(int64)
+	ttlInt64, ok2 := arr[1].(int64)
+	if !ok1 || !ok2 {
+		errType := fmt.Errorf("unexpected types in array: count=%T, ttl=%T", arr[0], arr[1])
+		log.Error().
+			Err(errType).
+			Str("key", key).
+			Interface("result", result).
+			Msg("Tipe elemen di dalam array tak terduga dari Redis Lua script")
+		return 0, 0, errType
+	}
+
+	count := int(countInt64)
+	ttl := int(ttlInt64)
 
 	return count, ttl, nil
 }
