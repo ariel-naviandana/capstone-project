@@ -25,3 +25,7 @@ func (s *TransactionService) GetByTxID(ctx context.Context, txID string) (*domai
 func (s *TransactionService) GetUserBalance(ctx context.Context, userID int64) (*domain.UserBalance, error) {
 	return s.repo.GetUserBalance(ctx, userID)
 }
+
+func (s *TransactionService) GetUserTransactions(ctx context.Context, userID int64, limit int, offset int) ([]*domain.TransactionDetail, error) {
+	return s.repo.GetUserTransactions(ctx, userID, limit, offset)
+}

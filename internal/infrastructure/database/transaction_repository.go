@@ -7,16 +7,20 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
 
-type transactionRepository struct {
-	writeDb *pgxpool.Pool
-	readDb  *pgxpool.Pool
+type DBQueryInterface interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func NewTransactionRepository(writeDb *pgxpool.Pool, readDb *pgxpool.Pool) domain.TransactionRepository {
+type transactionRepository struct {
+	writeDb DBQueryInterface
+	readDb  DBQueryInterface
+}
+
+func NewTransactionRepository(writeDb DBQueryInterface, readDb DBQueryInterface) domain.TransactionRepository {
 	return &transactionRepository{writeDb: writeDb, readDb: readDb}
 }
 
@@ -43,7 +47,7 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 		recipientID = 0
 	}
 
-	_, err := resilience.ExecuteWithBreaker[int64](ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (int64, error) {
+	_, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (int64, error) {
 		err := r.writeDb.QueryRow(ctx, query,
 			input.UserID,
 			recipientID,
@@ -67,12 +71,12 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
 	var detail domain.TransactionDetail
 	query := `
-		SELECT tx_id, id, user_id, recipient_id, amount, type, status, created_at, updated_at
+		SELECT tx_id, id, user_id, COALESCE(recipient_id, 0) as recipient_id, amount, type, status, created_at, updated_at
 		FROM transactions
 		WHERE tx_id = $1
 	`
 
-	result, err := resilience.ExecuteWithBreaker[*domain.TransactionDetail](ctx, resilience.PostgresBreaker, "PostgresGetByTxID", func() (*domain.TransactionDetail, error) {
+	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetByTxID", func() (*domain.TransactionDetail, error) {
 		err := r.readDb.QueryRow(ctx, query, txID).Scan(
 			&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
 			&detail.Amount, &detail.Type, &detail.Status,
@@ -101,7 +105,7 @@ func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64
 		WHERE id = $1
 	`
 
-	result, err := resilience.ExecuteWithBreaker[*domain.UserBalance](ctx, resilience.PostgresBreaker, "PostgresGetUserBalance", func() (*domain.UserBalance, error) {
+	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetUserBalance", func() (*domain.UserBalance, error) {
 		err := r.readDb.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("user not found for user_id=%d", userID)
@@ -117,3 +121,54 @@ func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64
 	}
 	return result, nil
 }
+
+func (r *transactionRepository) GetUserTransactions(ctx context.Context, userID int64, limit int, offset int) ([]*domain.TransactionDetail, error) {
+	// Manual Sharding Simulation:
+	// Jika sistem di-shard, kita dapat memilih db connection berdasarkan userID
+	// e.g., shardID := userID % 2
+	// dbPool := getShardDB(shardID)
+	// Namun di implementasi ini, kita mengambil langsung dari readDb (Replika).
+
+	query := `
+		SELECT tx_id, id, user_id, COALESCE(recipient_id, 0) as recipient_id, amount, type, status, created_at, updated_at
+		FROM transactions
+		WHERE user_id = $1 OR recipient_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetUserTransactions", func() ([]*domain.TransactionDetail, error) {
+		rows, err := r.readDb.Query(ctx, query, userID, limit, offset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to execute query get user transactions (user_id=%d): %w", userID, err)
+		}
+		defer rows.Close()
+
+		var transactions []*domain.TransactionDetail
+		for rows.Next() {
+			var detail domain.TransactionDetail
+			if err := rows.Scan(
+				&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
+				&detail.Amount, &detail.Type, &detail.Status,
+				&detail.CreatedAt, &detail.UpdatedAt,
+			); err != nil {
+				return nil, fmt.Errorf("failed to scan transaction row (user_id=%d): %w", userID, err)
+			}
+			transactions = append(transactions, &detail)
+		}
+
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("rows iteration error (user_id=%d): %w", userID, err)
+		}
+
+		return transactions, nil
+	})
+
+	if err != nil {
+		log.Warn().Err(err).Int64("user_id", userID).Msg("GetUserTransactions failed")
+		return nil, err
+	}
+
+	return result, nil
+}
+
