@@ -60,10 +60,11 @@ var (
 		},
 		OnStateChange: func(name string, from, to gobreaker.State) {
 			state := 0.0
-			if to == gobreaker.StateOpen {
+			switch to {
+			case gobreaker.StateOpen:
 				state = 1.0
 				observability.BreakerTripsTotal.WithLabelValues(name).Inc()
-			} else if to == gobreaker.StateHalfOpen {
+			case gobreaker.StateHalfOpen:
 				state = 2.0
 			}
 			observability.BreakerState.WithLabelValues(name).Set(state)
