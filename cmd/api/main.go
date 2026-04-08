@@ -214,9 +214,10 @@ func main() {
 			Msg("Health check performed")
 
 		statusCode := http.StatusOK
-		if overallStatus == "unhealthy" {
+		switch overallStatus {
+		case "unhealthy":
 			statusCode = http.StatusServiceUnavailable
-		} else if overallStatus == "degraded" {
+		case "degraded":
 			statusCode = http.StatusOK
 		}
 
