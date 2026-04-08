@@ -78,7 +78,8 @@ func TestTransactionHandler_GetUserBalance(t *testing.T) {
 			Username: "user1",
 			Balance:  50000,
 		}
-		cache.SetCache(context.Background(), "user_balance:1", cachedData, time.Minute)
+		err := cache.SetCache(context.Background(), "user_balance:1", cachedData, time.Minute)
+		assert.NoError(t, err)
 
 		req, _ := http.NewRequest(http.MethodGet, "/users/1/balance", nil)
 		resp := httptest.NewRecorder()

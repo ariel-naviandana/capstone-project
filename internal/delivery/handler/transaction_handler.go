@@ -140,7 +140,9 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 		return
 	}
 
-	cache.SetCache(c.Request.Context(), cacheKey, detail, 5*time.Minute)
+	if err := cache.SetCache(c.Request.Context(), cacheKey, detail, 5*time.Minute); err != nil {
+		logger.Warn().Err(err).Str("tx_id", txID).Msg("Failed to set transaction cache")
+	}
 
 	logger.Info().
 		Str("tx_id", txID).
@@ -210,7 +212,9 @@ func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
 		return
 	}
 
-	cache.SetCache(c.Request.Context(), cacheKey, balance, 10*time.Minute)
+	if err := cache.SetCache(c.Request.Context(), cacheKey, balance, 10*time.Minute); err != nil {
+		logger.Warn().Err(err).Int64("user_id", userID).Msg("Failed to set balance cache")
+	}
 
 	logger.Info().
 		Int64("user_id", userID).
@@ -264,7 +268,9 @@ func (h *TransactionHandler) GetUserTransactions(c *gin.Context) {
 	}
 
 	// Set cache dgn TTL sangat pendek agar tdk terlalu basi, tapi melindung DB dari refresh-spam user
-	cache.SetCache(c.Request.Context(), cacheKey, transactions, 15*time.Second)
+	if err := cache.SetCache(c.Request.Context(), cacheKey, transactions, 15*time.Second); err != nil {
+		logger.Warn().Err(err).Int64("user_id", userID).Msg("Failed to set transactions list cache")
+	}
 
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", transactions))
 }
