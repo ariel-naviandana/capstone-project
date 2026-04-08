@@ -53,6 +53,9 @@ func TestTransactionCreateStruct(t *testing.T) {
 			RecipientID: 2,
 			Description: "Test",
 		}
+		assert.Equal(t, int64(1), input.UserID)
+		assert.Equal(t, 5000.0, input.Amount)
+		assert.Equal(t, "transfer", input.Type)
 		assert.Equal(t, int64(2), input.RecipientID)
 		assert.Equal(t, "Test", input.Description)
 	})
@@ -97,6 +100,8 @@ func TestTransactionDetailStruct(t *testing.T) {
 	assert.Equal(t, 30000.0, detail.Amount)
 	assert.Equal(t, "transfer", detail.Type)
 	assert.Equal(t, "success", detail.Status)
+	assert.Equal(t, now, detail.CreatedAt)
+	assert.Equal(t, now, detail.UpdatedAt)
 }
 
 func TestUserBalanceStruct(t *testing.T) {
