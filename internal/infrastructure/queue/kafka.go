@@ -132,8 +132,6 @@ var kafkaReader *kafka.Reader
 
 const maxConcurrent = 100
 
-var processSemaphore = make(chan struct{}, maxConcurrent)
-
 func StartKafkaConsumer() {
 	brokers := config.AppConfig.KafkaBrokers
 	if len(brokers) == 0 {
@@ -262,7 +260,9 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
-	cache.SetCache(ctx, cacheKey, pendingDetail, 5*time.Minute)
+	if err := cache.SetCache(ctx, cacheKey, pendingDetail, 5*time.Minute); err != nil {
+		logger.Warn().Err(err).Str("tx_id", event.TxID).Msg("Failed to set pending cache")
+	}
 
 	var newStatus string = "success"
 	var details string = "Processed successfully"
@@ -277,7 +277,11 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				if err != nil {
 					return err
 				}
-				defer txDB.Rollback(ctx)
+				defer func() {
+					if rbErr := txDB.Rollback(ctx); rbErr != nil {
+						log.Warn().Err(rbErr).Msg("Error rolling back transaction")
+					}
+				}()
 
 				// 1. Deduplication using ON CONFLICT DO NOTHING
 				var insertedTxID string
@@ -387,11 +391,15 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 					// Update caching immediately (Write-Through rather than Invalidate)
 					userAccount.Balance = userBalance
-					cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.UserID), userAccount, 1*time.Minute)
+					if err := cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.UserID), userAccount, 1*time.Minute); err != nil {
+						log.Warn().Err(err).Int64("user_id", event.UserID).Msg("Failed to set user balance cache")
+					}
 
 					if event.Type == "transfer" && event.RecipientID != 0 {
 						recipientAccount.Balance = recipientBalance
-						cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.RecipientID), recipientAccount, 1*time.Minute)
+						if err := cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.RecipientID), recipientAccount, 1*time.Minute); err != nil {
+							log.Warn().Err(err).Int64("recipient_id", event.RecipientID).Msg("Failed to set recipient balance cache")
+						}
 					}
 				} else {
 					// Fallback for failed transactions
@@ -427,7 +435,9 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
-	cache.SetCache(ctx, cacheKey, finalDetail, 5*time.Minute)
+	if err := cache.SetCache(ctx, cacheKey, finalDetail, 5*time.Minute); err != nil {
+		logger.Warn().Err(err).Str("tx_id", event.TxID).Msg("Failed to set final cache")
+	}
 
 }
 
