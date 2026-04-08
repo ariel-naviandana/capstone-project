@@ -81,8 +81,19 @@ func TestConfigStruct(t *testing.T) {
 	}
 
 	assert.Equal(t, "8080", cfg.ServerPort)
+	assert.Equal(t, "localhost", cfg.PostgresHost)
+	assert.Equal(t, "5432", cfg.PostgresPort)
+	assert.Equal(t, "admin", cfg.PostgresUser)
+	assert.Equal(t, "secret", cfg.PostgresPassword)
+	assert.Equal(t, "mydb", cfg.PostgresDBName)
 	assert.Len(t, cfg.KafkaBrokers, 2)
 	assert.Equal(t, "transactions", cfg.KafkaTopic)
+	assert.Equal(t, "my-group", cfg.KafkaGroupID)
+	assert.Equal(t, "mongodb://localhost:27017", cfg.MongoURI)
+	assert.Equal(t, "localhost:6379", cfg.RedisAddr)
+	assert.Equal(t, "redispass", cfg.RedisPassword)
 	assert.Equal(t, 1, cfg.RedisDB)
+	assert.Equal(t, 1000, cfg.RateLimitRequests)
+	assert.Equal(t, 60, cfg.RateLimitWindow)
 	assert.True(t, cfg.LogInfo)
 }
