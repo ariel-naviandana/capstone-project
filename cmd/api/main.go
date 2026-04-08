@@ -72,7 +72,7 @@ func main() {
 
 	// Menggunakan gin.New() tanpa Logger bawaan untuk meminimalisasi CPU blocking I/O di terminal
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(middleware.CustomRecovery())
 
 	// Melindungi container dari goroutine leak saat DDOS (Limit 100 request concurrent / fail-fast)
 	middleware.InitDDosShield(100)
