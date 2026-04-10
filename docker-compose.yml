@@ -215,7 +215,7 @@ services:
       resources:
         limits:
           cpus: "0.2"
-          memory: 150M
+          memory: 256M
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -259,7 +259,7 @@ services:
       resources:
         limits:
           cpus: "0.7"
-          memory: 350M
+          memory: 512M
   prometheus:
     image: prom/prometheus:v2.52.0
     container_name: prometheus
