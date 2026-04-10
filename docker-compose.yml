@@ -207,7 +207,7 @@ services:
     healthcheck:
       test: ["CMD", "zookeeper-shell", "localhost:2181", "ls", "/"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     networks:
       - app-network
@@ -251,7 +251,7 @@ services:
           "--list",
         ]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     networks:
       - app-network
