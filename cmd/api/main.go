@@ -70,7 +70,13 @@ func main() {
 	txService := application.NewTransactionService(txRepo)
 	txHandler := handler.NewTransactionHandler(txService)
 
-	r := gin.Default()
+	// Menggunakan gin.New() tanpa Logger bawaan untuk meminimalisasi CPU blocking I/O di terminal
+	r := gin.New()
+	r.Use(middleware.CustomRecovery())
+
+	// Melindungi container dari goroutine leak saat DDOS (Limit 100 request concurrent / fail-fast)
+	middleware.InitDDosShield(100)
+	r.Use(middleware.DDosShield())
 
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
@@ -88,10 +94,25 @@ func main() {
 
 	r.Use(requestid.New())
 
+	// Inisialisasi Asynchronous UUID Pre-Generator Pool untuk ultra-low latency
+	uuidPool := make(chan string, 10000)
+	for i := 0; i < 3; i++ { // 3 Worker mempercepat pengisian
+		go func() {
+			for {
+				uuidPool <- uuid.New().String()
+			}
+		}()
+	}
+
 	r.Use(func(c *gin.Context) {
 		reqID := requestid.Get(c)
 		if reqID == "" {
-			reqID = uuid.New().String()
+			select {
+			case reqID = <-uuidPool:
+			default:
+				// Fallback jika semua worker uuid sibuk dan antrean pool kosong
+				reqID = uuid.New().String()
+			}
 		}
 
 		log.Debug().
@@ -117,6 +138,7 @@ func main() {
 		apiGroup.POST("/transactions", txHandler.Create)
 		apiGroup.GET("/transactions/:txId", txHandler.GetByTxID)
 		apiGroup.GET("/users/:id/balance", txHandler.GetUserBalance)
+		apiGroup.GET("/users/:id/transactions", txHandler.GetUserTransactions)
 	}
 
 	r.GET("/health", func(c *gin.Context) {
@@ -193,9 +215,10 @@ func main() {
 			Msg("Health check performed")
 
 		statusCode := http.StatusOK
-		if overallStatus == "unhealthy" {
+		switch overallStatus {
+		case "unhealthy":
 			statusCode = http.StatusServiceUnavailable
-		} else if overallStatus == "degraded" {
+		case "degraded":
 			statusCode = http.StatusOK
 		}
 
@@ -214,7 +237,15 @@ func main() {
 
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	if err := r.Run(":" + port); err != nil {
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 3 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal().Err(err).Msg("Failed to start server")
 	}
 }

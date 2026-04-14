@@ -13,7 +13,7 @@ var WritePool *pgxpool.Pool
 var ReadPool *pgxpool.Pool
 
 func ConnectPostgres() {
-	primaryDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=10",
+	primaryDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=2&pool_max_conn_idle_time=5m",
 		config.AppConfig.PostgresUser,
 		config.AppConfig.PostgresPassword,
 		"postgres-primary", // mapped in docker-compose
@@ -21,7 +21,7 @@ func ConnectPostgres() {
 		config.AppConfig.PostgresDBName,
 	)
 
-	replicaDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=10",
+	replicaDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=2&pool_max_conn_idle_time=5m",
 		config.AppConfig.PostgresUser,
 		config.AppConfig.PostgresPassword,
 		"postgres-replica",            // mapped in docker-compose

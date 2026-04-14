@@ -82,7 +82,9 @@ func ensureIndexes() {
 
 func CloseMongo() {
 	if MongoClient != nil {
-		MongoClient.Disconnect(context.Background())
+		if err := MongoClient.Disconnect(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("Error disconnecting from MongoDB")
+		}
 		log.Info().Msg("MongoDB disconnected")
 	}
 }

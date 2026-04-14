@@ -1,12 +1,26 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Trend, Rate } from 'k6/metrics';
+import { Trend, Rate, Counter } from 'k6/metrics';
 import { randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 
 // Custom metrics to separate read/write observations
 const transactionLatency = new Trend('tx_latency', true);
 const balanceLatency = new Trend('balance_latency', true);
 const errorRate = new Rate('errors');
+const validReqCounter = new Counter('valid_requests');
+const shieldedTxCounter = new Counter('shielded_tps');
+
+function handleResult(success, res) {
+    if (success) {
+        validReqCounter.add(1);
+        errorRate.add(false);
+    } else if (res.status === 503 || res.status === 429) {
+        shieldedTxCounter.add(1); // Ditangkis pertahanan (Bukan error aplikasi)
+        errorRate.add(false);
+    } else {
+        errorRate.add(true); // Error murni (500, EOF, Timeout)
+    }
+}
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
 
@@ -163,11 +177,11 @@ function readHeavyUser(userId) {
     const res = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
 
     balanceLatency.add(res.timings.duration);
-    const success = check(res, { 
+    const success = check(res, {
         'is status 200': (r) => r.status === 200,
-        'has balance data': (r) => r.body && r.body.includes('balance') 
+        'has balance data': (r) => r.body && r.body.includes('balance')
     });
-    errorRate.add(!success);
+    handleResult(success, res);
 
     // Realistic think time (reading screen)
     //sleep(randomIntBetween(0.1, 1));
@@ -176,7 +190,8 @@ function readHeavyUser(userId) {
     if (Math.random() < 0.2) {
         const refreshRes = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(refreshRes.timings.duration);
-        if (refreshRes.status !== 200) errorRate.add(1);
+        const refreshSuccess = check(refreshRes, { 'is status 200': (r) => r.status === 200 });
+        handleResult(refreshSuccess, refreshRes);
         //sleep(randomIntBetween(1, 3));
     }
 }
@@ -186,7 +201,9 @@ function activeTransactor(userId) {
     const params = { headers: generateHeaders(userId) };
 
     // Action 1: Pre-check balance
-    http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+    const balRes = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+    const balSuccess = check(balRes, { 'is status 200': (r) => r.status === 200 });
+    handleResult(balSuccess, balRes);
 
     // Think about the transfer amount
     //sleep(0.5);
@@ -206,7 +223,7 @@ function activeTransactor(userId) {
     transactionLatency.add(txRes.timings.duration);
 
     const success = check(txRes, { 'post tx status is 202': (r) => r.status === 202 });
-    if (!success) errorRate.add(1);
+    handleResult(success, txRes);
 
     // User receives notification and clicks it
     //sleep(0.5);
@@ -215,9 +232,8 @@ function activeTransactor(userId) {
     if (success && txRes.json('id')) {
         const txId = txRes.json('id');
         const statusRes = http.get(http.url`${BASE_URL}/transactions/${txId}`, params, { tags: { name: 'get-transaction-status' } });
-        if (statusRes.status !== 200 && statusRes.status !== 202) {
-            errorRate.add(1);
-        }
+        const statusSuccess = check(statusRes, { 'is status 200 or 202': (r) => r.status === 200 || r.status === 202 });
+        handleResult(statusSuccess, statusRes);
     }
 }
 
@@ -229,7 +245,8 @@ function apiClientBot(userId) {
         // Poll balance rapidly
         const res = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(res.timings.duration);
-        if (res.status !== 200) errorRate.add(1);
+        const botSuccess = check(res, { 'is status 200': (r) => r.status === 200 });
+        handleResult(botSuccess, res);
         //sleep(0.5); // Minimal delay
     }
 }

@@ -20,6 +20,11 @@ services:
       - .env
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.7"
+          memory: 150M
 
   worker:
     build:
@@ -38,6 +43,11 @@ services:
       - .env
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 150M
 
   postgres-primary:
     image: postgres:18
@@ -49,7 +59,7 @@ services:
         "-c",
         "max_connections=200",
         "-c",
-        "shared_buffers=256MB",
+        "shared_buffers=64MB",
         "-c",
         "synchronous_commit=off",
         "-c",
@@ -79,6 +89,11 @@ services:
       start_period: 30s
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.9"
+          memory: 256M
 
   postgres-replica:
     image: postgres:18
@@ -105,7 +120,7 @@ services:
           chown postgres:postgres -R /var/lib/postgresql/18;
         fi;
         echo 'Starting PostgreSQL...';
-        exec docker-entrypoint.sh postgres -c max_connections=200 -c shared_buffers=256MB
+        exec docker-entrypoint.sh postgres -c max_connections=200 -c shared_buffers=64MB
       "
     ports:
       - "5433:5432"
@@ -123,11 +138,17 @@ services:
       start_period: 120s
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
   redis:
     image: redis:7
     container_name: tx-redis
     restart: always
+    command: ["redis-server", "--maxmemory", "30mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "6379:6379"
     volumes:
@@ -139,11 +160,17 @@ services:
       retries: 5
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 50M
 
   mongo:
     image: mongo:7
     container_name: tx-mongo
     restart: always
+    command: ["mongod", "--wiredTigerCacheSizeGB", "0.25"]
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-mongo}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-capstone123}
@@ -158,6 +185,11 @@ services:
       retries: 5
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 350M
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
@@ -166,6 +198,7 @@ services:
     ports:
       - "2181:2181"
     environment:
+      KAFKA_HEAP_OPTS: "-Xmx128M -Xms128M"
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     volumes:
@@ -174,10 +207,15 @@ services:
     healthcheck:
       test: ["CMD", "zookeeper-shell", "localhost:2181", "ls", "/"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 256M
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -186,6 +224,7 @@ services:
     ports:
       - "9092:9092"
     environment:
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms256M"
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
@@ -212,10 +251,15 @@ services:
           "--list",
         ]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.7"
+          memory: 512M
   prometheus:
     image: prom/prometheus:v2.52.0
     container_name: prometheus
@@ -227,6 +271,11 @@ services:
       - "9090:9090"
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 128M
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -254,6 +303,11 @@ services:
       - prometheus
     networks:
       - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 128M
     healthcheck:
       test: ["CMD", "wget", "--spider", "http://localhost:3000/api/health"]
       interval: 10s

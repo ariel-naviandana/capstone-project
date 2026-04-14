@@ -137,8 +137,9 @@ capstone-go/
    - GET transaction: http://localhost:8000/transactions/{txId}
 
 ## Cara Jalankan dengan Docker
-```
-docker compose up --build -d
+```bash
+# Gunakan flag --compatibility jika limit resource (CPU/Memory) tidak teraplikasi pada environment non-Swarm
+docker compose up --build -d --compatibility
 ```
 
 - API: http://localhost:8000

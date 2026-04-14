@@ -1,0 +1,53 @@
+﻿=== RUN   TestTransactionHandler_GetUserBalance
+=== RUN   TestTransactionHandler_GetUserBalance/Success_-_Cache_Miss
+{"level":"info","user_id":1,"time":"2026-04-08T19:16:39+07:00","message":"GET /users/:id/balance ΓåÆ CACHE MISS, ambil dari PostgreSQL"}
+{"level":"debug","key":"user_balance:1","ttl":600000,"time":"2026-04-08T19:16:39+07:00","message":"Redis set success"}
+{"level":"info","user_id":1,"balance":100000,"time":"2026-04-08T19:16:39+07:00","message":"GET /users/:id/balance ΓåÆ success from PostgreSQL"}
+=== RUN   TestTransactionHandler_GetUserBalance/Success_-_Cache_Hit
+{"level":"debug","key":"balance:1","ttl":60000,"time":"2026-04-08T19:16:39+07:00","message":"Redis set success"}
+{"level":"info","user_id":1,"time":"2026-04-08T19:16:39+07:00","message":"GET /users/:id/balance ΓåÆ CACHE MISS, ambil dari PostgreSQL"}
+--- FAIL: TestTransactionHandler_GetUserBalance (0.01s)
+    --- PASS: TestTransactionHandler_GetUserBalance/Success_-_Cache_Miss (0.01s)
+    --- FAIL: TestTransactionHandler_GetUserBalance/Success_-_Cache_Hit (0.00s)
+panic: 
+	assert: mock: The method has been called over 1 times.
+		Either do one more Mock.On("GetUserBalance").Return(...), or remove extra call.
+		This call was unexpected:
+			GetUserBalance(context.backgroundCtx,int64)
+			0: context.backgroundCtx{emptyCtx:context.emptyCtx{}}
+			1: 1
+		at: [C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/domain/mocks/transaction_repository_mock.go:28 C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/application/transaction_service.go:26 C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/delivery/handler/transaction_handler.go:182 C:/Users/Ikhsa/go/pkg/mod/github.com/gin-gonic/gin@v1.11.0/context.go:192 C:/Users/Ikhsa/go/pkg/mod/github.com/gin-gonic/gin@v1.11.0/gin.go:689 C:/Users/Ikhsa/go/pkg/mod/github.com/gin-gonic/gin@v1.11.0/gin.go:643 C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/delivery/handler/transaction_handler_test.go:86] [recovered, repanicked]
+
+goroutine 41 [running]:
+testing.tRunner.func1.2({0x7ff775da23c0, 0xc000390610})
+	C:/Program Files/Go/src/testing/testing.go:1872 +0x239
+testing.tRunner.func1()
+	C:/Program Files/Go/src/testing/testing.go:1875 +0x35b
+panic({0x7ff775da23c0?, 0xc000390610?})
+	C:/Program Files/Go/src/runtime/panic.go:783 +0x132
+github.com/stretchr/testify/mock.(*Mock).fail(0xc000116730, {0x7ff77601eba1?, 0x8?}, {0xc0003b6400?, 0x2?, 0x2?})
+	C:/Users/Ikhsa/go/pkg/mod/github.com/stretchr/testify@v1.11.1/mock/mock.go:359 +0x125
+github.com/stretchr/testify/mock.(*Mock).MethodCalled(0xc000116730, {0x7ff7764dcb05, 0xe}, {0xc0003927e0, 0x2, 0x2})
+	C:/Users/Ikhsa/go/pkg/mod/github.com/stretchr/testify@v1.11.1/mock/mock.go:507 +0x2a6
+github.com/stretchr/testify/mock.(*Mock).Called(0xc000116730, {0xc0003927e0, 0x2, 0x2})
+	C:/Users/Ikhsa/go/pkg/mod/github.com/stretchr/testify@v1.11.1/mock/mock.go:491 +0x125
+github.com/capstone-b4/capstone-go/internal/domain/mocks.(*MockTransactionRepository).GetUserBalance(0xc000116730, {0x7ff77624abe8, 0x7ff776d76de0}, 0x1)
+	C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/domain/mocks/transaction_repository_mock.go:28 +0xcb
+github.com/capstone-b4/capstone-go/internal/application.(*TransactionService).GetUserBalance(...)
+	C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/application/transaction_service.go:26
+github.com/capstone-b4/capstone-go/internal/delivery/handler.(*TransactionHandler).GetUserBalance(0xc00010e170, 0xc00015e100)
+	C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/delivery/handler/transaction_handler.go:182 +0x471
+github.com/gin-gonic/gin.(*Context).Next(0xc00015e100)
+	C:/Users/Ikhsa/go/pkg/mod/github.com/gin-gonic/gin@v1.11.0/context.go:192 +0x4e
+github.com/gin-gonic/gin.(*Engine).handleHTTPRequest(0xc0001111e0, 0xc00015e100)
+	C:/Users/Ikhsa/go/pkg/mod/github.com/gin-gonic/gin@v1.11.0/gin.go:689 +0x435
+github.com/gin-gonic/gin.(*Engine).ServeHTTP(0xc0001111e0, {0x7ff776248c80, 0xc000119780}, 0xc000135680)
+	C:/Users/Ikhsa/go/pkg/mod/github.com/gin-gonic/gin@v1.11.0/gin.go:643 +0x1ad
+github.com/capstone-b4/capstone-go/internal/delivery/handler.TestTransactionHandler_GetUserBalance.func2(0xc000107500)
+	C:/Users/Ikhsa/Downloads/MINE/Semester 6/Capstone/test/capstone-project/internal/delivery/handler/transaction_handler_test.go:86 +0x165
+testing.tRunner(0xc000107500, 0xc00010afc0)
+	C:/Program Files/Go/src/testing/testing.go:1934 +0xc3
+created by testing.(*T).Run in goroutine 35
+	C:/Program Files/Go/src/testing/testing.go:1997 +0x44b
+FAIL	github.com/capstone-b4/capstone-go/internal/delivery/handler	0.149s
+FAIL
