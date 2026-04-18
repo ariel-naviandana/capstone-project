@@ -1,14 +1,28 @@
 FROM golang:1.24-alpine AS builder
+
 WORKDIR /app
+
 COPY go.mod go.sum ./
-ENV GOPROXY=https://goproxy.cn,direct
 RUN go mod download
+
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o api ./cmd/api/main.go
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /bankx-api ./cmd/api/main.go
 
 FROM alpine:latest
-WORKDIR /root/
-COPY --from=builder /app/api .
-COPY .env .
+
+RUN apk --no-cache add ca-certificates tzdata && \
+    adduser -D -g '' appuser
+
+WORKDIR /app
+
+COPY --from=builder /bankx-api .
+
+USER appuser
+
 EXPOSE 8000
-CMD ["./api"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1
+
+CMD ["./bankx-api"]

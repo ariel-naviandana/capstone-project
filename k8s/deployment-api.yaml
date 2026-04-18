@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bankx-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bankx-api
+  template:
+    metadata:
+      labels:
+        app: bankx-api
+    spec:
+      containers:
+      - name: api
+        image: capstone-project-api:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: bankx-config
+        - secretRef:
+            name: bankx-secret
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "150Mi"
+          limits:
+            cpu: "700m"
+            memory: "300Mi"
+
+        readinessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 12
+
+        livenessProbe:
+          tcpSocket:
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 8

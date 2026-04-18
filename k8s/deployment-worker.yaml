@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bankx-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bankx-worker
+  template:
+    metadata:
+      labels:
+        app: bankx-worker
+    spec:
+      containers:
+      - name: worker
+        image: capstone-project-worker:latest
+        imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: bankx-config
+        - secretRef:
+            name: bankx-secret
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "150Mi"
+          limits:
+            cpu: "500m"
+            memory: "300Mi"
