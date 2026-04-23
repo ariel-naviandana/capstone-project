@@ -148,7 +148,14 @@ services:
     image: redis:7
     container_name: tx-redis
     restart: always
-    command: ["redis-server", "--maxmemory", "30mb", "--maxmemory-policy", "allkeys-lru"]
+    command:
+      [
+        "redis-server",
+        "--maxmemory",
+        "30mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
     ports:
       - "6379:6379"
     volumes:
@@ -209,6 +216,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+      start_period: 30s
     networks:
       - app-network
     deploy:
@@ -240,7 +248,7 @@ services:
       - kafka_data:/var/lib/kafka/data
     depends_on:
       zookeeper:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test:
         [
