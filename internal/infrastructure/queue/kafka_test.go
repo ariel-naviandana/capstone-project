@@ -2,6 +2,7 @@ package queue
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func TestBackpressure_GoroutineLimit(t *testing.T) {
 
 	// Simulasi 150 task dengan semaphore
 	tasks := 150
-	completed := 0
+	var completed int64 // Gunakan int64 untuk atomic counter
 
 	for i := 0; i < tasks; i++ {
 		wg.Add(1)
@@ -97,14 +98,14 @@ func TestBackpressure_GoroutineLimit(t *testing.T) {
 
 			// Simulasi proses
 			time.Sleep(1 * time.Millisecond)
-			completed++
+			atomic.AddInt64(&completed, 1) // Atomic increment
 		}()
 	}
 
 	wg.Wait()
 
 	// Semua task harus selesai
-	assert.Equal(t, tasks, completed)
+	assert.Equal(t, int64(tasks), completed)
 	// Tidak lebih dari maxConcurrent goroutine yang berjalan bersamaan
 	// (ini dijamin oleh semaphore)
 }
