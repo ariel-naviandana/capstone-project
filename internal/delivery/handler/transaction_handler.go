@@ -38,19 +38,22 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		return
 	}
 
-	if input.Type == "transfer" && input.RecipientID == 0 {
-		logger.Warn().Msg("Missing recipient_id for transfer")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "recipient_id wajib untuk transfer", ""))
+	if input.Type == "transfer" && input.RecipientNo == "" {
+		logger.Warn().Msg("Missing recipient_no for transfer")
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "recipient_no wajib untuk transfer", ""))
 		return
 	}
 
-	if input.Type == "transfer" && input.UserID == input.RecipientID {
+	if input.Type == "transfer" && input.AccountNo == input.RecipientNo {
 		logger.Warn().Msg("Self-transfer not allowed")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "tidak bisa transfer ke diri sendiri", ""))
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "tidak bisa transfer ke rekening sendiri", ""))
 		return
 	}
 
-	txID := uuid.New().String()
+	txID := "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
+	if input.RefNo == "" {
+		input.RefNo = "REF-" + uuid.NewString()[:8]
+	}
 
 	traceID := c.GetString("trace_id")
 	_, err := resilience.ExecuteWithBreaker(
@@ -58,7 +61,7 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		resilience.KafkaProducerBreaker,
 		"KafkaPublish",
 		func() (struct{}, error) {
-			return struct{}{}, queue.PublishTransactionEvent(txID, input.UserID, input.RecipientID, input.Amount, input.Type, traceID)
+			return struct{}{}, queue.PublishTransactionEvent(txID, input.AccountNo, input.RecipientNo, input.Amount, input.Type, traceID)
 		},
 	)
 	if err != nil {
@@ -78,12 +81,12 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	logger.Info().
 		Str("tx_id", txID).
 		Str("type", input.Type).
-		Int64("user_id", input.UserID).
+		Str("account_no", input.AccountNo).
 		Float64("amount", input.Amount).
 		Msg("Transaction accepted and published to Kafka")
 
 	c.JSON(http.StatusAccepted, response.SuccessJSON("Transaksi diterima dan akan diproses async (status pending)", gin.H{
-		"id": txID,
+		"trx_id": txID,
 	}))
 }
 
@@ -126,7 +129,7 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 				Str("tx_id", txID).
 				Msg("Transaction belum ada di DB, masih processing")
 			c.JSON(http.StatusOK, response.SuccessJSON("Transaksi sedang diproses, coba lagi dalam beberapa detik", gin.H{
-				"tx_id":  txID,
+				"trx_id": txID,
 				"status": "processing",
 			}))
 			return
@@ -152,42 +155,37 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", detail))
 }
 
-func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
+func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
-	userIDStr := c.Param("id")
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id_str", userIDStr).
-			Msg("Invalid user ID")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid user ID", ""))
+	accountNo := c.Param("accountNo")
+	if accountNo == "" {
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
 		return
 	}
 
-	cacheKey := "user_balance:" + userIDStr
+	cacheKey := "account_balance:" + accountNo
 
-	if cached, found := cache.GetCached[domain.UserBalance](c.Request.Context(), cacheKey); found {
+	if cached, found := cache.GetCached[domain.AccountBalance](c.Request.Context(), cacheKey); found {
 		logger.Info().
-			Int64("user_id", userID).
+			Str("account_no", accountNo).
 			Float64("balance", cached.Balance).
-			Msg("GET /users/:id/balance → CACHE HIT (Redis)")
+			Msg("GET /accounts/:accountNo/balance → CACHE HIT (Redis)")
 		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
 		return
 	}
 
 	logger.Info().
-		Int64("user_id", userID).
-		Msg("GET /users/:id/balance → CACHE MISS, ambil dari PostgreSQL")
+		Str("account_no", accountNo).
+		Msg("GET /accounts/:accountNo/balance → CACHE MISS, ambil dari PostgreSQL")
 
-	balance, err := h.service.GetUserBalance(c.Request.Context(), userID)
+	balance, err := h.service.GetAccountBalance(c.Request.Context(), accountNo)
 	if err != nil {
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
 			logger.Warn().
 				Err(err).
-				Int64("user_id", userID).
-				Msg("Breaker reject di GetUserBalance")
+				Str("account_no", accountNo).
+				Msg("Breaker reject di GetAccountBalance")
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(
 				response.ErrServiceUnavailable,
 				"Sistem sedang overload atau database sibuk (Saldo sedang diproses)",
@@ -196,42 +194,40 @@ func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
 			return
 		}
 
-		if strings.Contains(err.Error(), "user not found") {
+		if strings.Contains(err.Error(), "account not found") {
 			logger.Info().
-				Int64("user_id", userID).
-				Msg("User not found")
-			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "User not found", ""))
+				Str("account_no", accountNo).
+				Msg("Account not found")
+			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "Account not found", ""))
 			return
 		}
 
 		logger.Error().
 			Err(err).
-			Int64("user_id", userID).
-			Msg("Gagal get balance user")
+			Str("account_no", accountNo).
+			Msg("Gagal get balance account")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Failed to get balance", err.Error()))
 		return
 	}
 
 	if err := cache.SetCache(c.Request.Context(), cacheKey, balance, 10*time.Minute); err != nil {
-		logger.Warn().Err(err).Int64("user_id", userID).Msg("Failed to set balance cache")
+		logger.Warn().Err(err).Str("account_no", accountNo).Msg("Failed to set balance cache")
 	}
 
 	logger.Info().
-		Int64("user_id", userID).
+		Str("account_no", accountNo).
 		Float64("balance", balance.Balance).
-		Msg("GET /users/:id/balance → success from PostgreSQL")
+		Msg("GET /accounts/:accountNo/balance → success from PostgreSQL")
 
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", balance))
 }
 
-func (h *TransactionHandler) GetUserTransactions(c *gin.Context) {
+func (h *TransactionHandler) GetAccountTransactions(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
-	userIDStr := c.Param("id")
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		logger.Warn().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user ID")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid user ID", ""))
+	accountNo := c.Param("accountNo")
+	if accountNo == "" {
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
 		return
 	}
 
@@ -247,29 +243,27 @@ func (h *TransactionHandler) GetUserTransactions(c *gin.Context) {
 		offset = 0
 	}
 
-	// Cache short-lived (opsional)
-	cacheKey := "list_tx:" + userIDStr + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	cacheKey := "list_tx:" + accountNo + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
 	if cached, found := cache.GetCached[[]*domain.TransactionDetail](c.Request.Context(), cacheKey); found {
-		logger.Info().Int64("user_id", userID).Msg("GET /users/:id/transactions → CACHE HIT")
+		logger.Info().Str("account_no", accountNo).Msg("GET /accounts/:accountNo/transactions → CACHE HIT")
 		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
 		return
 	}
 
-	logger.Info().Int64("user_id", userID).Msg("GET /users/:id/transactions → CACHE MISS")
-	transactions, err := h.service.GetUserTransactions(c.Request.Context(), userID, limit, offset)
+	logger.Info().Str("account_no", accountNo).Msg("GET /accounts/:accountNo/transactions → CACHE MISS")
+	transactions, err := h.service.GetAccountTransactions(c.Request.Context(), accountNo, limit, offset)
 	if err != nil {
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(response.ErrServiceUnavailable, "Sistem overload", err.Error()))
 			return
 		}
-		logger.Error().Err(err).Int64("user_id", userID).Msg("Failed to list user transactions")
+		logger.Error().Err(err).Str("account_no", accountNo).Msg("Failed to list account transactions")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Gagal mengambil daftar transaksi", err.Error()))
 		return
 	}
 
-	// Set cache dgn TTL sangat pendek agar tdk terlalu basi, tapi melindung DB dari refresh-spam user
 	if err := cache.SetCache(c.Request.Context(), cacheKey, transactions, 15*time.Second); err != nil {
-		logger.Warn().Err(err).Int64("user_id", userID).Msg("Failed to set transactions list cache")
+		logger.Warn().Err(err).Str("account_no", accountNo).Msg("Failed to set transactions list cache")
 	}
 
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", transactions))

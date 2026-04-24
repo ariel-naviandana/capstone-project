@@ -39,29 +39,28 @@ func setupTestServer() (*gin.Engine, *mocks.MockTransactionRepository, *miniredi
 	{
 		api.POST("/transactions", txHandler.Create)
 		api.GET("/transactions/:txId", txHandler.GetByTxID)
-		api.GET("/users/:id/balance", txHandler.GetUserBalance)
-		api.GET("/users/:id/transactions", txHandler.GetUserTransactions)
+		api.GET("/accounts/:accountNo/balance", txHandler.GetAccountBalance)
+		api.GET("/accounts/:accountNo/transactions", txHandler.GetAccountTransactions)
 	}
 
 	return r, mockRepo, mr
 }
 
-func TestTransactionHandler_GetUserBalance(t *testing.T) {
+func TestTransactionHandler_GetAccountBalance(t *testing.T) {
 	router, mockRepo, mr := setupTestServer()
 	defer mr.Close()
 
 	t.Run("Success - Cache Miss", func(t *testing.T) {
 		mr.FlushAll()
-		
-		expectedBalance := &domain.UserBalance{
-			ID:       1,
-			Username: "user1",
-			Balance:  100000,
+
+		expectedBalance := &domain.AccountBalance{
+			AccountNo: "ACC-1",
+			Balance:   100000,
 		}
 
-		mockRepo.On("GetUserBalance", mock.Anything, int64(1)).Return(expectedBalance, nil).Once()
+		mockRepo.On("GetAccountBalance", mock.Anything, "ACC-1").Return(expectedBalance, nil).Once()
 
-		req, _ := http.NewRequest(http.MethodGet, "/users/1/balance", nil)
+		req, _ := http.NewRequest(http.MethodGet, "/accounts/ACC-1/balance", nil)
 		resp := httptest.NewRecorder()
 
 		router.ServeHTTP(resp, req)
@@ -73,15 +72,14 @@ func TestTransactionHandler_GetUserBalance(t *testing.T) {
 
 	t.Run("Success - Cache Hit", func(t *testing.T) {
 		mr.FlushAll()
-		cachedData := &domain.UserBalance{
-			ID:       1,
-			Username: "user1",
-			Balance:  50000,
+		cachedData := &domain.AccountBalance{
+			AccountNo: "ACC-1",
+			Balance:   50000,
 		}
-		err := cache.SetCache(context.Background(), "user_balance:1", cachedData, time.Minute)
+		err := cache.SetCache(context.Background(), "account_balance:ACC-1", cachedData, time.Minute)
 		assert.NoError(t, err)
 
-		req, _ := http.NewRequest(http.MethodGet, "/users/1/balance", nil)
+		req, _ := http.NewRequest(http.MethodGet, "/accounts/ACC-1/balance", nil)
 		resp := httptest.NewRecorder()
 
 		router.ServeHTTP(resp, req)
@@ -89,35 +87,28 @@ func TestTransactionHandler_GetUserBalance(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.Code)
 		assert.Contains(t, resp.Body.String(), "50000")
 		// Pastikan Mock Repo tidak dipanggil karena di stop oleh Redis Cache
-		mockRepo.AssertNotCalled(t, "GetUserBalance") 
+		mockRepo.AssertNotCalled(t, "GetAccountBalance")
 	})
 
-	t.Run("Error - Invalid Format", func(t *testing.T) {
-		req, _ := http.NewRequest(http.MethodGet, "/users/abc/balance", nil)
-		resp := httptest.NewRecorder()
-
-		router.ServeHTTP(resp, req)
-
-		assert.Equal(t, http.StatusBadRequest, resp.Code)
-		assert.Contains(t, resp.Body.String(), "ERR_INVALID_INPUT")
-	})
+	// Di versi baru accountNo string bebas. Kita bs tes param kosong / malformed
+	// t.Run("Error - Invalid Format", ...)
 }
 
-func TestTransactionHandler_GetUserTransactions(t *testing.T) {
+func TestTransactionHandler_GetAccountTransactions(t *testing.T) {
 	router, mockRepo, mr := setupTestServer()
 	defer mr.Close()
 
 	t.Run("Success - Query with Default Pagination", func(t *testing.T) {
 		mr.FlushAll()
 		expectedTx := []*domain.TransactionDetail{
-			{ID: 1, Amount: 100},
-			{ID: 2, Amount: 200},
+			{TrxID: "trx-1", Amount: 100},
+			{TrxID: "trx-2", Amount: 200},
 		}
 
 		// default limit=10, offset=0
-		mockRepo.On("GetUserTransactions", mock.Anything, int64(2), 10, 0).Return(expectedTx, nil).Once()
+		mockRepo.On("GetAccountTransactions", mock.Anything, "ACC-2", 10, 0).Return(expectedTx, nil).Once()
 
-		req, _ := http.NewRequest(http.MethodGet, "/users/2/transactions", nil)
+		req, _ := http.NewRequest(http.MethodGet, "/accounts/ACC-2/transactions", nil)
 		resp := httptest.NewRecorder()
 
 		router.ServeHTTP(resp, req)
@@ -133,7 +124,7 @@ func TestTransactionHandler_CreateTransaction(t *testing.T) {
 	defer mr.Close()
 
 	t.Run("Error - Missing Recipient for Transfer", func(t *testing.T) {
-		body := []byte(`{"user_id":1,"amount":50000,"type":"transfer"}`)
+		body := []byte(`{"account_no":"ACC-1","amount":50000,"type":"transfer"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/transactions", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
@@ -141,9 +132,9 @@ func TestTransactionHandler_CreateTransaction(t *testing.T) {
 		router.ServeHTTP(resp, req)
 
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
-		assert.Contains(t, resp.Body.String(), "recipient_id wajib")
+		assert.Contains(t, resp.Body.String(), "recipient_no wajib")
 	})
-	
-	// Kita tidak mengetes sukses create karena Handler men-trigger Kafka (gobreaker.ExecuteWithBreaker), 
+
+	// Kita tidak mengetes sukses create karena Handler men-trigger Kafka (gobreaker.ExecuteWithBreaker),
 	// Di mana mock Kafka cukup rumit. Sehingga cukup memastikan request validation berjalan.
 }

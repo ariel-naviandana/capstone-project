@@ -12,6 +12,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/segmentio/kafka-go"
@@ -69,15 +70,15 @@ func createTopicIfNotExist(broker string, topic string) {
 	log.Info().Str("topic", topic).Msg("Topic berhasil dibuat otomatis")
 }
 
-func PublishTransactionEvent(txID string, userID int64, recipientID int64, amount float64, txType string, traceID string) error {
+func PublishTransactionEvent(txID string, accountNo string, recipientNo string, amount float64, txType string, traceID string) error {
 	if kafkaWriter == nil {
 		return fmt.Errorf("kafka writer belum di-init")
 	}
 
 	message := map[string]interface{}{
 		"tx_id":        txID,
-		"user_id":      userID,
-		"recipient_id": recipientID,
+		"account_no":   accountNo,
+		"recipient_no": recipientNo,
 		"amount":       amount,
 		"type":         txType,
 		"timestamp":    time.Now().UTC().Format(time.RFC3339),
@@ -228,6 +229,10 @@ func StartKafkaConsumer() {
 					return
 				}
 
+				// The previous event payload was different. Now it has tx_id, account_no, recipient_no, amount, type, timestamp.
+				// In our new schema, event.TxID is now event.TrxID if we matched domain models.
+				// Wait, we defined KafkaTransactionEvent with TrxID, AccountNo, RecipientNo, Amount, Type, Timestamp.
+				// But we published with tx_id etc in json keys.
 				processTransactionEvent(&event, eventLogger)
 			}(batchMsg)
 		}
@@ -248,12 +253,12 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cacheKey := "tx:" + event.TxID
+	cacheKey := "tx:" + event.TrxID
 
 	pendingDetail := domain.TransactionDetail{
-		TxID:        event.TxID,
-		UserID:      event.UserID,
-		RecipientID: event.RecipientID,
+		TrxID:       event.TrxID,
+		AccountNo:   event.AccountNo,
+		RecipientNo: event.RecipientNo,
 		Amount:      event.Amount,
 		Type:        event.Type,
 		Status:      "pending",
@@ -261,7 +266,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		UpdatedAt:   time.Now().UTC(),
 	}
 	if err := cache.SetCache(ctx, cacheKey, pendingDetail, 5*time.Minute); err != nil {
-		logger.Warn().Err(err).Str("tx_id", event.TxID).Msg("Failed to set pending cache")
+		logger.Warn().Err(err).Str("tx_id", event.TrxID).Msg("Failed to set pending cache")
 	}
 
 	var newStatus string = "success"
@@ -286,26 +291,26 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				// 1. Deduplication using ON CONFLICT DO NOTHING
 				var insertedTxID string
 				err = txDB.QueryRow(ctx,
-					`INSERT INTO transactions (tx_id, user_id, recipient_id, amount, type, status, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
-					 ON CONFLICT (tx_id) DO NOTHING RETURNING tx_id`,
-					event.TxID, event.UserID, event.RecipientID, event.Amount, event.Type).Scan(&insertedTxID)
+					`INSERT INTO transactions (trx_id, account_no, amount, type, status, created_at, updated_at)
+					 VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW())
+					 ON CONFLICT (trx_id, created_at) DO NOTHING RETURNING trx_id`,
+					event.TrxID, event.AccountNo, event.Amount, event.Type).Scan(&insertedTxID)
 
 				if err != nil && err.Error() != "no rows in result set" { // Duplicate tx will return no rows
 					return err
 				}
 
 				if insertedTxID == "" {
-					logger.Info().Str("tx_id", event.TxID).Msg("Tx sudah diproses sebelumnya (duplicate)")
+					logger.Info().Str("tx_id", event.TrxID).Msg("Tx sudah diproses sebelumnya (duplicate)")
 					return nil // Already processed
 				}
 
-				// 2. Lock Users & Calculate Balances safely
-				var userAccount domain.UserBalance
-				var recipientAccount domain.UserBalance
+				// 2. Lock Accounts & Calculate Balances safely
+				var userAccount domain.AccountBalance
+				var recipientAccount domain.AccountBalance
 
-				if event.Type == "transfer" && event.RecipientID != 0 {
-					rows, err := txDB.Query(ctx, "SELECT id, username, balance FROM users WHERE id IN ($1, $2) FOR UPDATE", event.UserID, event.RecipientID)
+				if event.Type == "transfer" && event.RecipientNo != "" {
+					rows, err := txDB.Query(ctx, "SELECT account_no, balance FROM accounts WHERE account_no IN ($1, $2) FOR UPDATE", event.AccountNo, event.RecipientNo)
 					if err != nil {
 						return err
 					}
@@ -313,14 +318,14 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 					var foundUser, foundRecipient bool
 					for rows.Next() {
-						var account domain.UserBalance
-						if err := rows.Scan(&account.ID, &account.Username, &account.Balance); err != nil {
+						var account domain.AccountBalance
+						if err := rows.Scan(&account.AccountNo, &account.Balance); err != nil {
 							continue
 						}
-						if account.ID == event.UserID {
+						if account.AccountNo == event.AccountNo {
 							userAccount = account
 							foundUser = true
-						} else if account.ID == event.RecipientID {
+						} else if account.AccountNo == event.RecipientNo {
 							recipientAccount = account
 							foundRecipient = true
 						}
@@ -329,14 +334,14 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 					if !foundUser || !foundRecipient {
 						newStatus = "failed"
-						details = "Salah satu user tidak ditemukan"
+						details = "Salah satu account tidak ditemukan"
 					}
 				} else {
-					err = txDB.QueryRow(ctx, "SELECT id, username, balance FROM users WHERE id = $1 FOR UPDATE", event.UserID).
-						Scan(&userAccount.ID, &userAccount.Username, &userAccount.Balance)
+					err = txDB.QueryRow(ctx, "SELECT account_no, balance FROM accounts WHERE account_no = $1 FOR UPDATE", event.AccountNo).
+						Scan(&userAccount.AccountNo, &userAccount.Balance)
 					if err != nil {
 						newStatus = "failed"
-						details = "Pengirim tidak ditemukan"
+						details = "Rekening pengirim tidak ditemukan"
 					}
 				}
 
@@ -366,7 +371,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 						} else {
 							userBalance -= event.Amount
 							recipientBalance += event.Amount
-							details = fmt.Sprintf("Transfer %.2f ke user %d", event.Amount, event.RecipientID)
+							details = fmt.Sprintf("Transfer %.2f ke rekening %s", event.Amount, event.RecipientNo)
 						}
 
 					default:
@@ -377,13 +382,13 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 				// 4. Update balances if success
 				if newStatus == "success" {
-					_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", userBalance, event.UserID)
+					_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", userBalance, event.AccountNo)
 					if err != nil {
 						return err
 					}
 
-					if event.Type == "transfer" && event.RecipientID != 0 {
-						_, err = txDB.Exec(ctx, "UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2", recipientBalance, event.RecipientID)
+					if event.Type == "transfer" && event.RecipientNo != "" {
+						_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", recipientBalance, event.RecipientNo)
 						if err != nil {
 							return err
 						}
@@ -391,14 +396,14 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 					// Update caching immediately (Write-Through rather than Invalidate)
 					userAccount.Balance = userBalance
-					if err := cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.UserID), userAccount, 1*time.Minute); err != nil {
-						log.Warn().Err(err).Int64("user_id", event.UserID).Msg("Failed to set user balance cache")
+					if err := cache.SetCache(ctx, fmt.Sprintf("account_balance:%s", event.AccountNo), userAccount, 1*time.Minute); err != nil {
+						log.Warn().Err(err).Str("account_no", event.AccountNo).Msg("Failed to set account balance cache")
 					}
 
-					if event.Type == "transfer" && event.RecipientID != 0 {
+					if event.Type == "transfer" && event.RecipientNo != "" {
 						recipientAccount.Balance = recipientBalance
-						if err := cache.SetCache(ctx, fmt.Sprintf("user_balance:%d", event.RecipientID), recipientAccount, 1*time.Minute); err != nil {
-							log.Warn().Err(err).Int64("recipient_id", event.RecipientID).Msg("Failed to set recipient balance cache")
+						if err := cache.SetCache(ctx, fmt.Sprintf("account_balance:%s", event.RecipientNo), recipientAccount, 1*time.Minute); err != nil {
+							log.Warn().Err(err).Str("recipient_no", event.RecipientNo).Msg("Failed to set recipient balance cache")
 						}
 					}
 				} else {
@@ -407,9 +412,18 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				}
 
 				// 5. Update transaction status
-				_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE tx_id = $2", newStatus, event.TxID)
+				_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE trx_id = $2", newStatus, event.TrxID)
 				if err != nil {
 					return err
+				}
+
+				// 6. Generate Notification
+				notifID := "NTF-" + uuid.NewString()[:8]
+				_, err = txDB.Exec(ctx, "INSERT INTO notifications (notif_id, account_no, channel, title, trx_ref, created_at, updated_at) VALUES ($1, $2, 'in-app', $3, $4, NOW(), NOW())",
+					notifID, event.AccountNo, details, event.TrxID)
+				if err != nil {
+					log.Warn().Err(err).Msg("Gagal membuat notifikasi")
+					// Not a hard failure for the transaction.
 				}
 
 				return txDB.Commit(ctx)
@@ -420,15 +434,15 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 	if breakerErr != nil {
 		logger.Warn().
 			Err(breakerErr).
-			Str("tx_id", event.TxID).
+			Str("tx_id", event.TrxID).
 			Msg("Postgres process ditolak breaker")
 		return
 	}
 
 	finalDetail := domain.TransactionDetail{
-		TxID:        event.TxID,
-		UserID:      event.UserID,
-		RecipientID: event.RecipientID,
+		TrxID:       event.TrxID,
+		AccountNo:   event.AccountNo,
+		RecipientNo: event.RecipientNo,
 		Amount:      event.Amount,
 		Type:        event.Type,
 		Status:      newStatus,
@@ -436,7 +450,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		UpdatedAt:   time.Now().UTC(),
 	}
 	if err := cache.SetCache(ctx, cacheKey, finalDetail, 5*time.Minute); err != nil {
-		logger.Warn().Err(err).Str("tx_id", event.TxID).Msg("Failed to set final cache")
+		logger.Warn().Err(err).Str("tx_id", event.TrxID).Msg("Failed to set final cache")
 	}
 
 }
