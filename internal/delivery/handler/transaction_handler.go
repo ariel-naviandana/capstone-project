@@ -217,5 +217,54 @@ func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
 		Float64("balance", balance.Balance).
 		Msg("GET /users/:id/balance → success from PostgreSQL")
 
-	c.JSON(http.StatusOK, balance)
+	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", balance))
+}
+
+func (h *TransactionHandler) GetUserTransactions(c *gin.Context) {
+	logger := logging.GetLogger(c)
+
+	userIDStr := c.Param("id")
+	userID, err := strconv.ParseInt(userIDStr, 10, 64)
+	if err != nil {
+		logger.Warn().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user ID")
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid user ID", ""))
+		return
+	}
+
+	limitStr := c.DefaultQuery("limit", "10")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 10
+	}
+
+	offsetStr := c.DefaultQuery("offset", "0")
+	offset, err := strconv.Atoi(offsetStr)
+	if err != nil || offset < 0 {
+		offset = 0
+	}
+
+	// Cache short-lived (opsional)
+	cacheKey := "list_tx:" + userIDStr + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	if cached, found := cache.GetCached[[]*domain.TransactionDetail](c.Request.Context(), cacheKey); found {
+		logger.Info().Int64("user_id", userID).Msg("GET /users/:id/transactions → CACHE HIT")
+		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
+		return
+	}
+
+	logger.Info().Int64("user_id", userID).Msg("GET /users/:id/transactions → CACHE MISS")
+	transactions, err := h.service.GetUserTransactions(c.Request.Context(), userID, limit, offset)
+	if err != nil {
+		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
+			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(response.ErrServiceUnavailable, "Sistem overload", err.Error()))
+			return
+		}
+		logger.Error().Err(err).Int64("user_id", userID).Msg("Failed to list user transactions")
+		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Gagal mengambil daftar transaksi", err.Error()))
+		return
+	}
+
+	// Set cache dgn TTL sangat pendek agar tdk terlalu basi, tapi melindung DB dari refresh-spam user
+	cache.SetCache(c.Request.Context(), cacheKey, transactions, 15*time.Second)
+
+	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", transactions))
 }

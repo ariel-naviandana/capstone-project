@@ -138,6 +138,7 @@ func main() {
 		apiGroup.POST("/transactions", txHandler.Create)
 		apiGroup.GET("/transactions/:txId", txHandler.GetByTxID)
 		apiGroup.GET("/users/:id/balance", txHandler.GetUserBalance)
+		apiGroup.GET("/users/:id/transactions", txHandler.GetUserTransactions)
 	}
 
 	r.GET("/health", func(c *gin.Context) {
