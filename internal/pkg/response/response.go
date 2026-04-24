@@ -19,14 +19,15 @@ type SuccessResponse struct {
 
 // Global Error Codes
 const (
-	ErrInvalidInput       = "ERR_INVALID_INPUT"       // 400
-	ErrUnauthorized       = "ERR_UNAUTHORIZED"        // 401
-	ErrForbidden          = "ERR_FORBIDDEN"           // 403
-	ErrNotFound           = "ERR_NOT_FOUND"           // 404
-	ErrConflict           = "ERR_CONFLICT"            // 409
-	ErrRateLimited        = "ERR_RATE_LIMITED"        // 429
-	ErrInternalError      = "ERR_INTERNAL_ERROR"      // 500
-	ErrServiceUnavailable = "ERR_SERVICE_UNAVAILABLE" // 503
+	ErrInvalidInput       = "ERR_INVALID_INPUT"        // 400
+	ErrUnauthorized       = "ERR_UNAUTHORIZED"         // 401
+	ErrForbidden          = "ERR_FORBIDDEN"            // 403
+	ErrNotFound           = "ERR_NOT_FOUND"            // 404
+	ErrMethodNotAllowed   = "ERR_METHOD_NOT_ALLOWED"   // 405
+	ErrConflict           = "ERR_CONFLICT"             // 409
+	ErrRateLimited        = "ERR_RATE_LIMITED"         // 429
+	ErrInternalError      = "ERR_INTERNAL_ERROR"       // 500
+	ErrServiceUnavailable = "ERR_SERVICE_UNAVAILABLE"  // 503
 )
 
 // Global Success Codes
@@ -79,6 +80,8 @@ func GetCodeForStatus(status int) string {
 		return ErrForbidden
 	case http.StatusNotFound:
 		return ErrNotFound
+	case http.StatusMethodNotAllowed:
+		return ErrMethodNotAllowed
 	case http.StatusConflict:
 		return ErrConflict
 	case http.StatusTooManyRequests:

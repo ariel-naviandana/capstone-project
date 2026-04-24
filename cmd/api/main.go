@@ -73,7 +73,15 @@ func main() {
 
 	// Menggunakan gin.New() tanpa Logger bawaan untuk meminimalisasi CPU blocking I/O di terminal
 	r := gin.New()
+	// Global error handlers — urutan Use() penting: Recovery dulu agar panic
+	// di middleware/handler downstream ter-capture, GlobalErrorHandler setelahnya
+	// supaya bisa proses c.Errors yang diset handler.
 	r.Use(middleware.CustomRecovery())
+	r.Use(middleware.GlobalErrorHandler())
+	// Handler untuk path tidak dikenal / method tidak diizinkan
+	r.HandleMethodNotAllowed = true
+	r.NoRoute(middleware.NoRouteHandler())
+	r.NoMethod(middleware.NoMethodHandler())
 
 	// Melindungi container dari goroutine leak saat DDOS (Limit 100 request concurrent / fail-fast)
 	middleware.InitDDosShield(100)
