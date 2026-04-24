@@ -28,6 +28,9 @@ type Config struct {
 	RateLimitRequests int `mapstructure:"RATE_LIMIT_REQUESTS"`
 	RateLimitWindow   int `mapstructure:"RATE_LIMIT_WINDOW"`
 
+	JWTSecret     string `mapstructure:"JWT_SECRET"`
+	JWTExpiryHour int    `mapstructure:"JWT_EXPIRY_HOUR"`
+
 	LogInfo bool `mapstructure:"LOG_INFO"`
 }
 
@@ -46,6 +49,7 @@ func LoadConfig() {
 	viper.SetDefault("SERVER_PORT", "8000")
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 25000)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
+	viper.SetDefault("JWT_EXPIRY_HOUR", 24)
 
 	// Bind Environment Variables for Viper Unmarshal
 	_ = viper.BindEnv("POSTGRES_HOST")
@@ -60,6 +64,8 @@ func LoadConfig() {
 	_ = viper.BindEnv("REDIS_ADDR")
 	_ = viper.BindEnv("REDIS_PASSWORD")
 	_ = viper.BindEnv("REDIS_DB")
+	_ = viper.BindEnv("JWT_SECRET")
+	_ = viper.BindEnv("JWT_EXPIRY_HOUR")
 	_ = viper.BindEnv("LOG_INFO")
 
 	if err := viper.Unmarshal(&AppConfig); err != nil {
