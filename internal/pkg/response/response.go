@@ -1,6 +1,10 @@
 package response
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
 
 type ErrorResponse struct {
 	Code    string `json:"code"`
@@ -15,12 +19,14 @@ type SuccessResponse struct {
 
 // Global Error Codes
 const (
-	ErrInvalidInput       = "ERR_INVALID_INPUT"
-	ErrNotFound           = "ERR_NOT_FOUND"
-	ErrServiceUnavailable = "ERR_SERVICE_UNAVAILABLE"
-	ErrInternalError      = "ERR_INTERNAL_ERROR"
-	ErrUnauthorized       = "ERR_UNAUTHORIZED"
-	ErrConflict           = "ERR_CONFLICT"
+	ErrInvalidInput       = "ERR_INVALID_INPUT"       // 400
+	ErrUnauthorized       = "ERR_UNAUTHORIZED"        // 401
+	ErrForbidden          = "ERR_FORBIDDEN"           // 403
+	ErrNotFound           = "ERR_NOT_FOUND"           // 404
+	ErrConflict           = "ERR_CONFLICT"            // 409
+	ErrRateLimited        = "ERR_RATE_LIMITED"        // 429
+	ErrInternalError      = "ERR_INTERNAL_ERROR"      // 500
+	ErrServiceUnavailable = "ERR_SERVICE_UNAVAILABLE" // 503
 )
 
 // Global Success Codes
@@ -30,7 +36,7 @@ const (
 	SuccessAccepted = "SUCCESS_ACCEPTED"
 )
 
-// Helper function untuk generate success response
+// SuccessJSON — wrapper konsisten untuk response sukses.
 func SuccessJSON(message string, data interface{}) SuccessResponse {
 	return SuccessResponse{
 		Message: message,
@@ -38,7 +44,7 @@ func SuccessJSON(message string, data interface{}) SuccessResponse {
 	}
 }
 
-// Helper function untuk generate error response
+// ErrorJSON — wrapper konsisten untuk response error.
 func ErrorJSON(code string, message string, detail string) ErrorResponse {
 	return ErrorResponse{
 		Code:    code,
@@ -47,19 +53,38 @@ func ErrorJSON(code string, message string, detail string) ErrorResponse {
 	}
 }
 
-// Map HTTP Status ke Error Code default
+// StatusJSON menulis response error ke c.JSON dengan wrapper ErrorResponse.
+// Tidak memanggil c.Abort — kalau butuh stop pipeline middleware, pakai AbortJSON.
+func StatusJSON(c *gin.Context, status int, code, message, detail string) {
+	c.JSON(status, ErrorJSON(code, message, detail))
+}
+
+// AbortJSON menulis response error + menghentikan pipeline middleware (c.Abort).
+// Dipakai di middleware (rate limit, auth, shield) supaya handler downstream
+// tidak ikut dieksekusi.
+func AbortJSON(c *gin.Context, status int, code, message, detail string) {
+	c.AbortWithStatusJSON(status, ErrorJSON(code, message, detail))
+}
+
+// GetCodeForStatus — map HTTP Status ke Error Code default.
+// Menjamin konsistensi antara HTTP semantik dan application-level code
+// saat caller tidak eksplisit menentukan code.
 func GetCodeForStatus(status int) string {
 	switch status {
 	case http.StatusBadRequest:
 		return ErrInvalidInput
-	case http.StatusNotFound:
-		return ErrNotFound
-	case http.StatusServiceUnavailable:
-		return ErrServiceUnavailable
 	case http.StatusUnauthorized:
 		return ErrUnauthorized
+	case http.StatusForbidden:
+		return ErrForbidden
+	case http.StatusNotFound:
+		return ErrNotFound
 	case http.StatusConflict:
 		return ErrConflict
+	case http.StatusTooManyRequests:
+		return ErrRateLimited
+	case http.StatusServiceUnavailable:
+		return ErrServiceUnavailable
 	default:
 		return ErrInternalError
 	}

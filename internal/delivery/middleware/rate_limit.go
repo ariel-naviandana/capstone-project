@@ -8,6 +8,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/config"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
+	"github.com/capstone-b4/capstone-go/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 
@@ -54,12 +55,11 @@ func RateLimiter() gin.HandlerFunc {
 				Str("path", c.FullPath()).
 				Msg("Rate limit exceeded")
 
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error":       "Too many requests",
-				"message":     "Anda telah mencapai batas request, silakan coba lagi nanti",
-				"retry_after": ttlSeconds,
-				"identifier":  identifier,
-			})
+			detail := "retry_after=" + strconv.Itoa(ttlSeconds) + "s; identifier=" + identifier
+			response.AbortJSON(c, http.StatusTooManyRequests,
+				response.ErrRateLimited,
+				"Anda telah mencapai batas request, silakan coba lagi nanti",
+				detail)
 			return
 		}
 

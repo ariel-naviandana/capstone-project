@@ -16,6 +16,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
 	_ "github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
+	"github.com/capstone-b4/capstone-go/internal/pkg/response"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -201,28 +202,27 @@ func main() {
 			components["mongo"] = "up"
 		}
 
-		response := gin.H{
-			"status":     overallStatus,
-			"components": components,
-		}
-		if errMsg != "" {
-			response["message"] = errMsg
-		}
-
 		logger.Info().
 			Str("overall_status", overallStatus).
 			Interface("components", components).
 			Msg("Health check performed")
 
-		statusCode := http.StatusOK
-		switch overallStatus {
-		case "unhealthy":
-			statusCode = http.StatusServiceUnavailable
-		case "degraded":
-			statusCode = http.StatusOK
+		if overallStatus == "unhealthy" {
+			// Error path: bungkus dalam ErrorResponse (konsisten dgn error lain),
+			// taruh daftar komponen down di field Detail (ringkas) + log detail di errMsg.
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"code":       response.ErrServiceUnavailable,
+				"message":    "One or more dependencies are down",
+				"detail":     errMsg,
+				"components": components,
+			})
+			return
 		}
 
-		c.JSON(statusCode, response)
+		c.JSON(http.StatusOK, response.SuccessJSON("Service healthy", gin.H{
+			"status":     overallStatus,
+			"components": components,
+		}))
 	})
 
 	port := config.AppConfig.ServerPort

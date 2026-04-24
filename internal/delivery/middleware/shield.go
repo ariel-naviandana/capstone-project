@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 
+	"github.com/capstone-b4/capstone-go/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,10 +29,10 @@ func DDosShield() gin.HandlerFunc {
 		default:
 			// Jatuh ke sini jika koneksi / antrean di aplikasi sudah penuh (misal > 500 koneksi)
 			// Berikan rejeksi langsung TANPA menyentuh logic, DB, maupun Redis
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
-				"error":   "Service Unavailable",
-				"message": "Sistem sedang menghadapi traffic tinggi, silakan coba beberapa saat lagi.",
-			})
+			response.AbortJSON(c, http.StatusServiceUnavailable,
+				response.ErrServiceUnavailable,
+				"Sistem sedang menghadapi traffic tinggi, silakan coba beberapa saat lagi.",
+				"ddos-shield concurrent limit reached")
 			return
 		}
 	}
