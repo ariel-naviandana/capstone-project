@@ -58,10 +58,10 @@ export const options = {
 // HELPER LOGIC FOR REALISTIC DATA 
 // =========================================================================
 
-function generateHeaders(userId) {
+function generateHeaders(accountNo) {
     return {
         'Content-Type': 'application/json',
-        'X-User-ID': userId.toString(),
+        'X-Account-No': accountNo,
         'Accept': 'application/json',
         'User-Agent': `k6-Performance-Test-1M-per-Hour/1.0 (Real User Sim; VU: ${__VU})`,
     };
@@ -72,9 +72,10 @@ function generateHeaders(userId) {
 // =========================================================================
 
 function readHeavyUser(userId) {
-    const params = { headers: generateHeaders(userId) };
+    const accountNo = `123-456-${userId.toString().padStart(6, '0')}`;
+    const params = { headers: generateHeaders(accountNo) };
 
-    const res = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+    const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
     balanceLatency.add(res.timings.duration);
     const success = check(res, { 
         'is status 200': (r) => r.status === 200,
@@ -83,7 +84,7 @@ function readHeavyUser(userId) {
     handleResult(success, res);
 
     if (Math.random() < 0.2) {
-        const refreshRes = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+        const refreshRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(refreshRes.timings.duration);
         const refreshSuccess = check(refreshRes, { 'is status 200': (r) => r.status === 200 });
         handleResult(refreshSuccess, refreshRes);
@@ -91,9 +92,10 @@ function readHeavyUser(userId) {
 }
 
 function activeTransactor(userId) {
-    const params = { headers: generateHeaders(userId) };
+    const accountNo = `123-456-${userId.toString().padStart(6, '0')}`;
+    const params = { headers: generateHeaders(accountNo) };
 
-    const balRes = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+    const balRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
     const balSuccess = check(balRes, { 'is status 200': (r) => r.status === 200 });
     handleResult(balSuccess, balRes);
 
@@ -101,10 +103,10 @@ function activeTransactor(userId) {
     const amount = randomIntBetween(10, 5000); 
 
     const payload = JSON.stringify({
-        user_id: userId,
+        account_no: accountNo,
         amount: amount,
         type: type,
-        description: `Realistic ${type} by user ${userId}`,
+        description: `Realistic ${type} by user ${accountNo}`,
     });
 
     const txRes = http.post(`${BASE_URL}/transactions`, payload, params, { tags: { name: 'post-transaction' } });
@@ -113,8 +115,8 @@ function activeTransactor(userId) {
     const success = check(txRes, { 'post tx status is 202': (r) => r.status === 202 });
     handleResult(success, txRes);
 
-    if (success && txRes.json('id')) {
-        const txId = txRes.json('id');
+    if (success && txRes.json('data.trx_id')) {
+        const txId = txRes.json('data.trx_id');
         const statusRes = http.get(http.url`${BASE_URL}/transactions/${txId}`, params, { tags: { name: 'get-transaction-status' } });
         const statusSuccess = check(statusRes, { 'is status 200 or 202': (r) => r.status === 200 || r.status === 202 });
         handleResult(statusSuccess, statusRes);
@@ -122,10 +124,11 @@ function activeTransactor(userId) {
 }
 
 function apiClientBot(userId) {
-    const params = { headers: generateHeaders(userId) };
+    const accountNo = `123-456-${userId.toString().padStart(6, '0')}`;
+    const params = { headers: generateHeaders(accountNo) };
 
     for (let i = 0; i < 10; i++) {
-        const res = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+        const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(res.timings.duration);
         const botSuccess = check(res, { 'is status 200': (r) => r.status === 200 });
         handleResult(botSuccess, res);
