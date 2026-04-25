@@ -47,7 +47,7 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 		RETURNING trx_id
 	`
 
-	_, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (string, error) {
+	returnedID, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (string, error) {
 		var returnedTrxID string
 		err := r.writeDb.QueryRow(ctx, query,
 			trxID,
@@ -66,7 +66,7 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 		return "", err
 	}
 
-	return trxID, nil
+	return returnedID, nil
 }
 
 func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {

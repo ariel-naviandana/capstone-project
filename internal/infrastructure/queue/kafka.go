@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/segmentio/kafka-go"
@@ -156,7 +158,7 @@ func StartKafkaConsumer() {
 	for {
 		var msg kafka.Message
 
-		_, breakerErr := resilience.ExecuteWithBreaker[kafka.Message](
+		_, breakerErr := resilience.ExecuteWithBreaker(
 			context.Background(),
 			resilience.KafkaConsumerBreaker,
 			"KafkaRead",
@@ -272,7 +274,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 	var newStatus string = "success"
 	var details string = "Processed successfully"
 
-	_, breakerErr := resilience.ExecuteWithBreaker[struct{}](
+	_, breakerErr := resilience.ExecuteWithBreaker(
 		ctx,
 		resilience.PostgresBreaker,
 		"PostgresProcessTx",
@@ -296,7 +298,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 					 ON CONFLICT (trx_id, created_at) DO NOTHING RETURNING trx_id`,
 					event.TrxID, event.AccountNo, event.Amount, event.Type).Scan(&insertedTxID)
 
-				if err != nil && err.Error() != "no rows in result set" { // Duplicate tx will return no rows
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) { // Duplicate tx will return no rows
 					return err
 				}
 
@@ -322,10 +324,11 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 						if err := rows.Scan(&account.AccountNo, &account.Balance); err != nil {
 							continue
 						}
-						if account.AccountNo == event.AccountNo {
+						switch account.AccountNo {
+						case event.AccountNo:
 							userAccount = account
 							foundUser = true
-						} else if account.AccountNo == event.RecipientNo {
+						case event.RecipientNo:
 							recipientAccount = account
 							foundRecipient = true
 						}

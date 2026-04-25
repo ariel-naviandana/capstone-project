@@ -64,13 +64,24 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 -- Note: In PostgreSQL, adding an FK where the referenced table doesn't exist yet will fail, 
--- so we alter preferences here, or we just don't enforce default_account FK to keep it simple.
-ALTER TABLE customer_preferences ADD CONSTRAINT fk_default_account FOREIGN KEY (default_account) REFERENCES accounts(account_no) ON DELETE SET NULL;
+-- so we alter preferences here. Wrapped in DO block to make it idempotent on re-init.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_default_account'
+  ) THEN
+    ALTER TABLE customer_preferences ADD CONSTRAINT fk_default_account
+      FOREIGN KEY (default_account) REFERENCES accounts(account_no) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- 7. Transactions (Partitioned)
+-- Note: FKs are not supported on partitioned parent tables in PostgreSQL.
+-- We define the FK on each child partition individually below.
 CREATE TABLE IF NOT EXISTS transactions (
     trx_id VARCHAR(50),
-    account_no VARCHAR(50) NOT NULL REFERENCES accounts(account_no) ON DELETE CASCADE,
+    account_no VARCHAR(50) NOT NULL,
     type VARCHAR(50) NOT NULL,
     amount DOUBLE PRECISION NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
@@ -80,16 +91,33 @@ CREATE TABLE IF NOT EXISTS transactions (
     CONSTRAINT tx_pk PRIMARY KEY (trx_id, created_at)
 ) PARTITION BY RANGE (created_at);
 
--- Partitions for Transactions
+-- Partitions for Transactions (with FK enforced on each child partition)
 CREATE TABLE transactions_y2026m04 PARTITION OF transactions FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+ALTER TABLE transactions_y2026m04 ADD CONSTRAINT fk_tx_y2026m04_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m05 PARTITION OF transactions FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+ALTER TABLE transactions_y2026m05 ADD CONSTRAINT fk_tx_y2026m05_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m06 PARTITION OF transactions FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+ALTER TABLE transactions_y2026m06 ADD CONSTRAINT fk_tx_y2026m06_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m07 PARTITION OF transactions FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
+ALTER TABLE transactions_y2026m07 ADD CONSTRAINT fk_tx_y2026m07_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m08 PARTITION OF transactions FOR VALUES FROM ('2026-08-01') TO ('2026-09-01');
+ALTER TABLE transactions_y2026m08 ADD CONSTRAINT fk_tx_y2026m08_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m09 PARTITION OF transactions FOR VALUES FROM ('2026-09-01') TO ('2026-10-01');
+ALTER TABLE transactions_y2026m09 ADD CONSTRAINT fk_tx_y2026m09_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m10 PARTITION OF transactions FOR VALUES FROM ('2026-10-01') TO ('2026-11-01');
+ALTER TABLE transactions_y2026m10 ADD CONSTRAINT fk_tx_y2026m10_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m11 PARTITION OF transactions FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
+ALTER TABLE transactions_y2026m11 ADD CONSTRAINT fk_tx_y2026m11_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
+
 CREATE TABLE transactions_y2026m12 PARTITION OF transactions FOR VALUES FROM ('2026-12-01') TO ('2027-01-01');
+ALTER TABLE transactions_y2026m12 ADD CONSTRAINT fk_tx_y2026m12_account FOREIGN KEY (account_no) REFERENCES accounts(account_no) ON DELETE CASCADE;
 
 -- 8. Cards
 CREATE TABLE IF NOT EXISTS cards (
@@ -125,6 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_account_no ON transactions(account_n
 CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
 CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
+CREATE INDEX IF NOT EXISTS idx_transactions_trx_id ON transactions(trx_id);
 CREATE INDEX IF NOT EXISTS idx_cards_account_no ON cards(account_no);
 CREATE INDEX IF NOT EXISTS idx_notifications_account_no ON notifications(account_no);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
