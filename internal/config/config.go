@@ -7,6 +7,10 @@ import (
 )
 
 type Config struct {
+	// APP_ENV gates protective middleware. "test" / "perf" disables the
+	// rate limiter and DDoS shield so k6 can drive real load against the
+	// app. Anything else (default "prod") keeps protections active.
+	AppEnv     string `mapstructure:"APP_ENV"`
 	ServerPort string `mapstructure:"SERVER_PORT"`
 
 	PostgresHost     string `mapstructure:"POSTGRES_HOST"`
@@ -27,8 +31,14 @@ type Config struct {
 
 	RateLimitRequests int `mapstructure:"RATE_LIMIT_REQUESTS"`
 	RateLimitWindow   int `mapstructure:"RATE_LIMIT_WINDOW"`
+	ShieldMaxInflight int `mapstructure:"SHIELD_MAX_INFLIGHT"`
 
 	LogInfo bool `mapstructure:"LOG_INFO"`
+}
+
+// IsTestEnv reports whether protective middleware should be skipped (for k6 / perf runs).
+func (c Config) IsTestEnv() bool {
+	return c.AppEnv == "test" || c.AppEnv == "perf"
 }
 
 var AppConfig Config
@@ -43,11 +53,15 @@ func LoadConfig() {
 	viper.AutomaticEnv()
 
 	// Set Default Values
+	viper.SetDefault("APP_ENV", "prod")
 	viper.SetDefault("SERVER_PORT", "8000")
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 25000)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
+	viper.SetDefault("SHIELD_MAX_INFLIGHT", 100)
 
 	// Bind Environment Variables for Viper Unmarshal
+	_ = viper.BindEnv("APP_ENV")
+	_ = viper.BindEnv("SHIELD_MAX_INFLIGHT")
 	_ = viper.BindEnv("POSTGRES_HOST")
 	_ = viper.BindEnv("POSTGRES_PORT")
 	_ = viper.BindEnv("POSTGRES_USER")

@@ -10,6 +10,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/capstone-b4/capstone-go/internal/pkg/response"
@@ -65,6 +66,7 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		},
 	)
 	if err != nil {
+		observability.RequestsRejectedTotal.WithLabelValues("breaker", "/transactions").Inc()
 		logger.Warn().
 			Err(err).
 			Str("tx_id", txID).
@@ -78,13 +80,6 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		return
 	}
 
-	logger.Info().
-		Str("tx_id", txID).
-		Str("type", input.Type).
-		Str("account_no", input.AccountNo).
-		Float64("amount", input.Amount).
-		Msg("Transaction accepted and published to Kafka")
-
 	c.JSON(http.StatusAccepted, response.SuccessJSON("Transaksi diterima dan akan diproses async (status pending)", gin.H{
 		"trx_id": txID,
 	}))
@@ -97,21 +92,14 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 	cacheKey := "tx:" + txID
 
 	if cached, found := cache.GetCached[domain.TransactionDetail](c.Request.Context(), cacheKey); found {
-		logger.Info().
-			Str("tx_id", txID).
-			Str("status", cached.Status).
-			Msg("GET /transactions → CACHE HIT (Redis)")
 		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
 		return
 	}
 
-	logger.Info().
-		Str("tx_id", txID).
-		Msg("GET /transactions → CACHE MISS, cek ke PostgreSQL")
-
 	detail, err := h.service.GetByTxID(c.Request.Context(), txID)
 	if err != nil {
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
+			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/transactions/:txId").Inc()
 			logger.Warn().
 				Err(err).
 				Str("tx_id", txID).
@@ -125,9 +113,6 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 		}
 
 		if strings.Contains(err.Error(), "transaction not found") || strings.Contains(err.Error(), "no rows") {
-			logger.Info().
-				Str("tx_id", txID).
-				Msg("Transaction belum ada di DB, masih processing")
 			c.JSON(http.StatusOK, response.SuccessJSON("Transaksi sedang diproses, coba lagi dalam beberapa detik", gin.H{
 				"trx_id": txID,
 				"status": "processing",
@@ -147,11 +132,6 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 		logger.Warn().Err(err).Str("tx_id", txID).Msg("Failed to set transaction cache")
 	}
 
-	logger.Info().
-		Str("tx_id", txID).
-		Str("status", detail.Status).
-		Msg("GET /transactions → success from PostgreSQL")
-
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", detail))
 }
 
@@ -167,21 +147,14 @@ func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 	cacheKey := "account_balance:" + accountNo
 
 	if cached, found := cache.GetCached[domain.AccountBalance](c.Request.Context(), cacheKey); found {
-		logger.Info().
-			Str("account_no", accountNo).
-			Float64("balance", cached.Balance).
-			Msg("GET /accounts/:accountNo/balance → CACHE HIT (Redis)")
 		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
 		return
 	}
 
-	logger.Info().
-		Str("account_no", accountNo).
-		Msg("GET /accounts/:accountNo/balance → CACHE MISS, ambil dari PostgreSQL")
-
 	balance, err := h.service.GetAccountBalance(c.Request.Context(), accountNo)
 	if err != nil {
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
+			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/accounts/:accountNo/balance").Inc()
 			logger.Warn().
 				Err(err).
 				Str("account_no", accountNo).
@@ -195,9 +168,6 @@ func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 		}
 
 		if strings.Contains(err.Error(), "account not found") {
-			logger.Info().
-				Str("account_no", accountNo).
-				Msg("Account not found")
 			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "Account not found", ""))
 			return
 		}
@@ -213,11 +183,6 @@ func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 	if err := cache.SetCache(c.Request.Context(), cacheKey, balance, 10*time.Minute); err != nil {
 		logger.Warn().Err(err).Str("account_no", accountNo).Msg("Failed to set balance cache")
 	}
-
-	logger.Info().
-		Str("account_no", accountNo).
-		Float64("balance", balance.Balance).
-		Msg("GET /accounts/:accountNo/balance → success from PostgreSQL")
 
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", balance))
 }
@@ -245,15 +210,14 @@ func (h *TransactionHandler) GetAccountTransactions(c *gin.Context) {
 
 	cacheKey := "list_tx:" + accountNo + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
 	if cached, found := cache.GetCached[[]*domain.TransactionDetail](c.Request.Context(), cacheKey); found {
-		logger.Info().Str("account_no", accountNo).Msg("GET /accounts/:accountNo/transactions → CACHE HIT")
 		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
 		return
 	}
 
-	logger.Info().Str("account_no", accountNo).Msg("GET /accounts/:accountNo/transactions → CACHE MISS")
 	transactions, err := h.service.GetAccountTransactions(c.Request.Context(), accountNo, limit, offset)
 	if err != nil {
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
+			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/accounts/:accountNo/transactions").Inc()
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(response.ErrServiceUnavailable, "Sistem overload", err.Error()))
 			return
 		}

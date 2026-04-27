@@ -159,8 +159,11 @@ function generateHeaders(accountNo) {
     return {
         'Content-Type': 'application/json',
         'X-Account-No': accountNo,
+        // The server's rate limiter keys on X-User-ID first, then falls back
+        // to client IP. All k6 VUs share one host IP, so without this header
+        // we'd hammer a single rate-limit bucket. Per-account limits = realistic.
+        'X-User-ID': accountNo,
         'Accept': 'application/json',
-        // Simulate real browsers dropping realistic User-Agent headers
         'User-Agent': `k6-Performance-Test/1.0 (Real User Sim; VU: ${__VU})`,
     };
 }
@@ -179,21 +182,25 @@ function readHeavyUser(userId) {
 
     balanceLatency.add(res.timings.duration);
     const success = check(res, {
-        'is status 200': (r) => r.status === 200,
-        'has balance data': (r) => r.body && r.body.includes('balance')
+        'balance status 200': (r) => r.status === 200,
+        'balance has data': (r) => {
+            if (r.status !== 200) return false;
+            try {
+                const body = r.json();
+                return body && body.data && typeof body.data.balance === 'number';
+            } catch (_e) {
+                return false;
+            }
+        },
     });
     handleResult(success, res);
-
-    // Realistic think time (reading screen)
-    //sleep(randomIntBetween(0.1, 1));
 
     // Maybe check again (20% chance of impatient reload)
     if (Math.random() < 0.2) {
         const refreshRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(refreshRes.timings.duration);
-        const refreshSuccess = check(refreshRes, { 'is status 200': (r) => r.status === 200 });
+        const refreshSuccess = check(refreshRes, { 'balance status 200': (r) => r.status === 200 });
         handleResult(refreshSuccess, refreshRes);
-        //sleep(randomIntBetween(1, 3));
     }
 }
 
