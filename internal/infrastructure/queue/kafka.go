@@ -255,9 +255,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cacheKey := "tx:" + event.TrxID
-
-	pendingDetail := domain.TransactionDetail{
+	pendingDetail := &domain.TransactionDetail{
 		TrxID:       event.TrxID,
 		AccountNo:   event.AccountNo,
 		RecipientNo: event.RecipientNo,
@@ -267,9 +265,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
-	if err := cache.SetCache(ctx, cacheKey, pendingDetail, 5*time.Minute); err != nil {
-		logger.Warn().Err(err).Str("tx_id", event.TrxID).Msg("Failed to set pending cache")
-	}
+	cache.TxLayer.WriteThrough(ctx, event.TrxID, pendingDetail)
 
 	var newStatus string = "success"
 	var details string = "Processed successfully"
@@ -397,17 +393,15 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 						}
 					}
 
-					// Update caching immediately (Write-Through rather than Invalidate)
+					// Update caching immediately (Write-Through rather than Invalidate).
+					// BalanceLayer populates both L1 + Redis so reads after a commit
+					// hit memory directly without going to Postgres.
 					userAccount.Balance = userBalance
-					if err := cache.SetCache(ctx, fmt.Sprintf("account_balance:%s", event.AccountNo), userAccount, 1*time.Minute); err != nil {
-						log.Warn().Err(err).Str("account_no", event.AccountNo).Msg("Failed to set account balance cache")
-					}
+					cache.BalanceLayer.WriteThrough(ctx, event.AccountNo, &userAccount)
 
 					if event.Type == "transfer" && event.RecipientNo != "" {
 						recipientAccount.Balance = recipientBalance
-						if err := cache.SetCache(ctx, fmt.Sprintf("account_balance:%s", event.RecipientNo), recipientAccount, 1*time.Minute); err != nil {
-							log.Warn().Err(err).Str("recipient_no", event.RecipientNo).Msg("Failed to set recipient balance cache")
-						}
+						cache.BalanceLayer.WriteThrough(ctx, event.RecipientNo, &recipientAccount)
 					}
 				} else {
 					// Fallback for failed transactions
@@ -442,7 +436,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		return
 	}
 
-	finalDetail := domain.TransactionDetail{
+	finalDetail := &domain.TransactionDetail{
 		TrxID:       event.TrxID,
 		AccountNo:   event.AccountNo,
 		RecipientNo: event.RecipientNo,
@@ -452,10 +446,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		CreatedAt:   time.Now().UTC(),
 		UpdatedAt:   time.Now().UTC(),
 	}
-	if err := cache.SetCache(ctx, cacheKey, finalDetail, 5*time.Minute); err != nil {
-		logger.Warn().Err(err).Str("tx_id", event.TrxID).Msg("Failed to set final cache")
-	}
-
+	cache.TxLayer.WriteThrough(ctx, event.TrxID, finalDetail)
 }
 
 func CloseKafkaConsumer() {

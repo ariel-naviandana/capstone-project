@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -89,21 +91,29 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
 	txID := c.Param("txId")
-	cacheKey := "tx:" + txID
 
-	if cached, found := cache.GetCached[domain.TransactionDetail](c.Request.Context(), cacheKey); found {
-		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
-		return
-	}
+	detail, bytes, err := cache.TxLayer.GetOrFetch(c.Request.Context(), txID,
+		func(ctx context.Context) (*domain.TransactionDetail, error) {
+			d, ferr := h.service.GetByTxID(ctx, txID)
+			if ferr != nil && (strings.Contains(ferr.Error(), "transaction not found") || strings.Contains(ferr.Error(), "no rows")) {
+				return nil, cache.ErrNotFound
+			}
+			return d, ferr
+		},
+	)
 
-	detail, err := h.service.GetByTxID(c.Request.Context(), txID)
 	if err != nil {
+		if errors.Is(err, cache.ErrNotFound) {
+			// Tx hasn't landed in DB yet — worker may still be processing.
+			c.JSON(http.StatusOK, response.SuccessJSON("Transaksi sedang diproses, coba lagi dalam beberapa detik", gin.H{
+				"trx_id": txID,
+				"status": "processing",
+			}))
+			return
+		}
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
 			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/transactions/:txId").Inc()
-			logger.Warn().
-				Err(err).
-				Str("tx_id", txID).
-				Msg("Breaker reject di GetByTxID")
+			logger.Warn().Err(err).Str("tx_id", txID).Msg("Breaker reject di GetByTxID")
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(
 				response.ErrServiceUnavailable,
 				"Sistem sedang overload atau database sibuk (transaksi sedang diproses)",
@@ -111,27 +121,15 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 			))
 			return
 		}
-
-		if strings.Contains(err.Error(), "transaction not found") || strings.Contains(err.Error(), "no rows") {
-			c.JSON(http.StatusOK, response.SuccessJSON("Transaksi sedang diproses, coba lagi dalam beberapa detik", gin.H{
-				"trx_id": txID,
-				"status": "processing",
-			}))
-			return
-		}
-
-		logger.Error().
-			Err(err).
-			Str("tx_id", txID).
-			Msg("Gagal query DB untuk transaction")
+		logger.Error().Err(err).Str("tx_id", txID).Msg("Gagal query DB untuk transaction")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Failed to get transaction", err.Error()))
 		return
 	}
 
-	if err := cache.SetCache(c.Request.Context(), cacheKey, detail, 5*time.Minute); err != nil {
-		logger.Warn().Err(err).Str("tx_id", txID).Msg("Failed to set transaction cache")
+	if bytes != nil {
+		c.Data(http.StatusOK, "application/json; charset=utf-8", buildSuccessBody(bytes))
+		return
 	}
-
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", detail))
 }
 
@@ -144,21 +142,24 @@ func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 		return
 	}
 
-	cacheKey := "account_balance:" + accountNo
+	balance, bytes, err := cache.BalanceLayer.GetOrFetch(c.Request.Context(), accountNo,
+		func(ctx context.Context) (*domain.AccountBalance, error) {
+			b, ferr := h.service.GetAccountBalance(ctx, accountNo)
+			if ferr != nil && strings.Contains(ferr.Error(), "account not found") {
+				return nil, cache.ErrNotFound
+			}
+			return b, ferr
+		},
+	)
 
-	if cached, found := cache.GetCached[domain.AccountBalance](c.Request.Context(), cacheKey); found {
-		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
-		return
-	}
-
-	balance, err := h.service.GetAccountBalance(c.Request.Context(), accountNo)
 	if err != nil {
+		if errors.Is(err, cache.ErrNotFound) {
+			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "Account not found", ""))
+			return
+		}
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
 			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/accounts/:accountNo/balance").Inc()
-			logger.Warn().
-				Err(err).
-				Str("account_no", accountNo).
-				Msg("Breaker reject di GetAccountBalance")
+			logger.Warn().Err(err).Str("account_no", accountNo).Msg("Breaker reject di GetAccountBalance")
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(
 				response.ErrServiceUnavailable,
 				"Sistem sedang overload atau database sibuk (Saldo sedang diproses)",
@@ -166,25 +167,34 @@ func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 			))
 			return
 		}
-
-		if strings.Contains(err.Error(), "account not found") {
-			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "Account not found", ""))
-			return
-		}
-
-		logger.Error().
-			Err(err).
-			Str("account_no", accountNo).
-			Msg("Gagal get balance account")
+		logger.Error().Err(err).Str("account_no", accountNo).Msg("Gagal get balance account")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Failed to get balance", err.Error()))
 		return
 	}
 
-	if err := cache.SetCache(c.Request.Context(), cacheKey, balance, 10*time.Minute); err != nil {
-		logger.Warn().Err(err).Str("account_no", accountNo).Msg("Failed to set balance cache")
+	if bytes != nil {
+		// Fast path: pre-marshaled balance body is already in cache, so we
+		// only have to splice it into the success envelope. Skips the
+		// per-request domain.AccountBalance -> JSON encode entirely.
+		c.Data(http.StatusOK, "application/json; charset=utf-8", buildSuccessBody(bytes))
+		return
 	}
-
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", balance))
+}
+
+// successPrefix / successSuffix surround the cached data bytes to produce the
+// same wire format as response.SuccessResponse{Message: "Succeed", Data: ...}.
+var (
+	successPrefix = []byte(`{"message":"Succeed","data":`)
+	successSuffix = []byte(`}`)
+)
+
+func buildSuccessBody(data []byte) []byte {
+	out := make([]byte, 0, len(successPrefix)+len(data)+len(successSuffix))
+	out = append(out, successPrefix...)
+	out = append(out, data...)
+	out = append(out, successSuffix...)
+	return out
 }
 
 func (h *TransactionHandler) GetAccountTransactions(c *gin.Context) {

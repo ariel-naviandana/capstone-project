@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/capstone-b4/capstone-go/internal/application"
@@ -27,6 +26,7 @@ func setupTestServer() (*gin.Engine, *mocks.MockTransactionRepository, *miniredi
 	cache.RedisClient = redis.NewClient(&redis.Options{
 		Addr: mr.Addr(),
 	})
+	cache.InitLayers()
 
 	mockRepo := new(mocks.MockTransactionRepository)
 	service := application.NewTransactionService(mockRepo)
@@ -76,8 +76,7 @@ func TestTransactionHandler_GetAccountBalance(t *testing.T) {
 			AccountNo: "ACC-1",
 			Balance:   50000,
 		}
-		err := cache.SetCache(context.Background(), "account_balance:ACC-1", cachedData, time.Minute)
-		assert.NoError(t, err)
+		cache.BalanceLayer.WriteThrough(context.Background(), "ACC-1", cachedData)
 
 		req, _ := http.NewRequest(http.MethodGet, "/accounts/ACC-1/balance", nil)
 		resp := httptest.NewRecorder()
