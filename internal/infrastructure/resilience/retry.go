@@ -21,7 +21,16 @@ func RetryWithBackoff(ctx context.Context, operation func() error, maxRetries in
 			Msg("Retry attempt")
 	}
 
-	err := backoff.RetryNotify(operation, bo, notify)
+	// Honor both the caller's retry budget and the request context. Without
+	// WithMaxRetries the maxRetries arg was silently ignored; without
+	// WithContext a canceled ctx kept retrying until MaxElapsedTime.
+	var policy backoff.BackOff = bo
+	if maxRetries > 0 {
+		policy = backoff.WithMaxRetries(bo, uint64(maxRetries))
+	}
+	policy = backoff.WithContext(policy, ctx)
+
+	err := backoff.RetryNotify(operation, policy, notify)
 	if err != nil {
 		log.Warn().
 			Err(err).

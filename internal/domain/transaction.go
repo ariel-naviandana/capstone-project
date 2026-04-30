@@ -27,6 +27,7 @@ type KafkaTransactionEvent struct {
 	RecipientNo string  `json:"recipient_no,omitempty"`
 	Amount      float64 `json:"amount"`
 	Type        string  `json:"type"`
+	RefNo       string  `json:"ref_no,omitempty"`
 	Timestamp   string  `json:"timestamp"`
 }
 
@@ -37,6 +38,7 @@ type TransactionDetail struct {
 	Amount      float64   `json:"amount"`
 	Type        string    `json:"type"`
 	Status      string    `json:"status"`
+	RefNo       string    `json:"ref_no,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

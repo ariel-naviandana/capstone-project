@@ -27,10 +27,7 @@ func NewTransactionRepository(writeDb DBQueryInterface, readDb DBQueryInterface)
 }
 
 func (r *transactionRepository) Create(ctx context.Context, input *domain.TransactionCreate) (string, error) {
-	trxID := input.RefNo
-	if trxID == "" {
-		trxID = "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
-	}
+	trxID := "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
 
 	query := `
 		INSERT INTO transactions (
@@ -52,8 +49,8 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 		err := r.writeDb.QueryRow(ctx, query,
 			trxID,
 			input.AccountNo,
-			input.Amount,
 			input.Type,
+			input.Amount,
 			input.RefNo,
 		).Scan(&returnedTrxID)
 		if err != nil {
@@ -71,8 +68,9 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 
 func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
 	var detail domain.TransactionDetail
+	var refNo *string
 	query := `
-		SELECT trx_id, account_no, amount, type, status, created_at, updated_at
+		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		FROM transactions
 		WHERE trx_id = $1
 	`
@@ -81,8 +79,11 @@ func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*do
 		err := r.readDb.QueryRow(ctx, query, txID).Scan(
 			&detail.TrxID, &detail.AccountNo,
 			&detail.Amount, &detail.Type, &detail.Status,
-			&detail.CreatedAt, &detail.UpdatedAt,
+			&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 		)
+		if refNo != nil {
+			detail.RefNo = *refNo
+		}
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("transaction not found for trx_id=%s", txID)
 		}
@@ -125,7 +126,7 @@ func (r *transactionRepository) GetAccountBalance(ctx context.Context, accountNo
 
 func (r *transactionRepository) GetAccountTransactions(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error) {
 	query := `
-		SELECT trx_id, account_no, amount, type, status, created_at, updated_at
+		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		FROM transactions
 		WHERE account_no = $1
 		ORDER BY created_at DESC
@@ -142,12 +143,16 @@ func (r *transactionRepository) GetAccountTransactions(ctx context.Context, acco
 		var transactions []*domain.TransactionDetail
 		for rows.Next() {
 			var detail domain.TransactionDetail
+			var refNo *string
 			if err := rows.Scan(
 				&detail.TrxID, &detail.AccountNo,
 				&detail.Amount, &detail.Type, &detail.Status,
-				&detail.CreatedAt, &detail.UpdatedAt,
+				&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 			); err != nil {
 				return nil, fmt.Errorf("failed to scan transaction row (account_no=%s): %w", accountNo, err)
+			}
+			if refNo != nil {
+				detail.RefNo = *refNo
 			}
 			transactions = append(transactions, &detail)
 		}

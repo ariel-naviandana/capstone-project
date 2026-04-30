@@ -58,11 +58,12 @@ func TestTransactionRepository_GetAccountTransactions(t *testing.T) {
 
 	t.Run("Success Returns Data", func(t *testing.T) {
 		timeNow := time.Now()
-		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "created_at", "updated_at"}).
-			AddRow("tx123", "ACC-1", float64(50000), "deposit", "success", timeNow, timeNow).
-			AddRow("tx456", "ACC-1", float64(20000), "transfer", "pending", timeNow, timeNow)
+		var nilRef *string
+		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"}).
+			AddRow("tx123", "ACC-1", float64(50000), "deposit", "success", nilRef, timeNow, timeNow).
+			AddRow("tx456", "ACC-1", float64(20000), "transfer", "pending", nilRef, timeNow, timeNow)
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, created_at, updated_at FROM transactions`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions`).
 			WithArgs("ACC-1", 10, 0).
 			WillReturnRows(rows)
 
@@ -76,9 +77,9 @@ func TestTransactionRepository_GetAccountTransactions(t *testing.T) {
 	})
 
 	t.Run("Success Returns Empty Database", func(t *testing.T) {
-		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "created_at", "updated_at"})
+		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"})
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, created_at, updated_at FROM transactions`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions`).
 			WithArgs("ACC-3", 10, 0).
 			WillReturnRows(rows)
 

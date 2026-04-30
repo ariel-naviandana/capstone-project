@@ -54,8 +54,32 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	}
 
 	txID := "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
-	if input.RefNo == "" {
-		input.RefNo = "REF-" + uuid.NewString()[:8]
+
+	// Idempotency-by-ref_no: when the client supplies ref_no, claim
+	// idem:<ref_no> -> trx_id in Redis with SETNX. A retry of the same ref_no
+	// returns the previously-issued trx_id instead of producing a duplicate
+	// transaction. Empty ref_no means the client is opting out of dedup.
+	idemClaimed := false
+	idemKey := ""
+	if input.RefNo != "" {
+		idemKey = "idem:tx:" + input.RefNo
+		ok, claimErr := cache.RedisClient.SetNX(c.Request.Context(), idemKey, txID, 24*time.Hour).Result()
+		if claimErr != nil {
+			logger.Warn().Err(claimErr).Str("ref_no", input.RefNo).Msg("Idempotency SETNX failed; proceeding without claim")
+		} else if !ok {
+			existing, getErr := cache.RedisClient.Get(c.Request.Context(), idemKey).Result()
+			if getErr == nil && existing != "" {
+				logger.Info().Str("ref_no", input.RefNo).Str("existing_tx_id", existing).Msg("Duplicate ref_no; returning existing trx_id")
+				c.JSON(http.StatusOK, response.SuccessJSON("Transaksi dengan ref_no ini sudah pernah diterima", gin.H{
+					"trx_id":     existing,
+					"idempotent": true,
+				}))
+				return
+			}
+			// Race: claim disappeared between SETNX and GET. Treat as new.
+		} else {
+			idemClaimed = true
+		}
 	}
 
 	traceID := c.GetString("trace_id")
@@ -64,10 +88,17 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		resilience.KafkaProducerBreaker,
 		"KafkaPublish",
 		func() (struct{}, error) {
-			return struct{}{}, queue.PublishTransactionEvent(txID, input.AccountNo, input.RecipientNo, input.Amount, input.Type, traceID)
+			return struct{}{}, queue.PublishTransactionEvent(txID, input.AccountNo, input.RecipientNo, input.Amount, input.Type, input.RefNo, traceID)
 		},
 	)
 	if err != nil {
+		// Roll back the idempotency claim so the client can retry without
+		// being told their tx is "already processed" when nothing was queued.
+		if idemClaimed {
+			if delErr := cache.RedisClient.Del(c.Request.Context(), idemKey).Err(); delErr != nil {
+				logger.Warn().Err(delErr).Str("ref_no", input.RefNo).Msg("Failed to release idempotency claim after publish failure")
+			}
+		}
 		observability.RequestsRejectedTotal.WithLabelValues("breaker", "/transactions").Inc()
 		logger.Warn().
 			Err(err).
