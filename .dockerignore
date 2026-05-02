@@ -1,0 +1,13 @@
+.git
+.vscode
+vendor/
+data/
+tmp/
+*.log
+postgres-data/
+mysql-data/
+
+*.json
+k6_results_*.json
+
+api.exe
