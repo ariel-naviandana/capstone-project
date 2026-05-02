@@ -14,7 +14,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
-	_ "github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
 
@@ -65,6 +66,11 @@ func main() {
 
 	queue.InitKafkaProducer()
 	defer queue.CloseKafkaProducer()
+
+	// Start PgBouncer metrics collector (background goroutine)
+	metricsCtx, metricsCancel := context.WithCancel(context.Background())
+	defer metricsCancel()
+	observability.StartPgBouncerMetrics(metricsCtx, config.AppConfig.PgBouncerAdminAddr, database.WritePool, database.ReadPool)
 
 	txRepo := database.NewTransactionRepository(database.WritePool, database.ReadPool)
 	txService := application.NewTransactionService(txRepo)
@@ -147,6 +153,25 @@ func main() {
 		components := make(map[string]string)
 		overallStatus := "healthy"
 		var errMsg string
+
+		// PgBouncer health check — one-shot connection, tests the pooler itself
+		pgbCtx, pgbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer pgbCancel()
+		pgbConn, pgbErr := pgx.Connect(pgbCtx, fmt.Sprintf(
+			"postgres://%s:%s@%s/capstone?sslmode=disable",
+			config.AppConfig.PostgresUser,
+			config.AppConfig.PostgresPassword,
+			config.AppConfig.PgBouncerAddr,
+		))
+		if pgbErr != nil {
+			components["pgbouncer"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("PgBouncer down: %v; ", pgbErr)
+			logger.Warn().Err(pgbErr).Msg("Health check: PgBouncer down")
+		} else {
+			components["pgbouncer"] = "up"
+			pgbConn.Close(pgbCtx)
+		}
 
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer pgCancel()
@@ -240,6 +265,7 @@ func main() {
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           r,
+		ReadTimeout:       5 * time.Second,
 		ReadHeaderTimeout: 3 * time.Second,
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
