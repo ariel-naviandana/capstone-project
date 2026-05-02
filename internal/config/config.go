@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
@@ -14,6 +16,8 @@ type Config struct {
 	PostgresUser     string `mapstructure:"POSTGRES_USER"`
 	PostgresPassword string `mapstructure:"POSTGRES_PASSWORD"`
 	PostgresDBName   string `mapstructure:"POSTGRES_DB"`
+	PgBouncerAddr      string `mapstructure:"PGBOUNCER_ADDR"`
+	PgBouncerAdminAddr string `mapstructure:"PGBOUNCER_ADMIN_ADDR"`
 
 	KafkaBrokers []string `mapstructure:"KAFKA_BROKERS"`
 	KafkaTopic   string   `mapstructure:"KAFKA_TOPIC"`
@@ -46,6 +50,7 @@ func LoadConfig() {
 	viper.SetDefault("SERVER_PORT", "8000")
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 25000)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
+	viper.SetDefault("PGBOUNCER_ADDR", "pgbouncer:6432")
 
 	// Bind Environment Variables for Viper Unmarshal
 	_ = viper.BindEnv("POSTGRES_HOST")
@@ -53,6 +58,8 @@ func LoadConfig() {
 	_ = viper.BindEnv("POSTGRES_USER")
 	_ = viper.BindEnv("POSTGRES_PASSWORD")
 	_ = viper.BindEnv("POSTGRES_DB")
+	_ = viper.BindEnv("PGBOUNCER_ADDR")
+	_ = viper.BindEnv("PGBOUNCER_ADMIN_ADDR")
 	_ = viper.BindEnv("KAFKA_BROKERS")
 	_ = viper.BindEnv("KAFKA_TOPIC")
 	_ = viper.BindEnv("KAFKA_GROUP_ID")
@@ -64,6 +71,17 @@ func LoadConfig() {
 
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		log.Fatal().Err(err).Msg("Config unmarshal error")
+	}
+
+	// Build admin DSN from loaded credentials if not explicitly set via env.
+	// Avoids hardcoding a password default in source code.
+	if AppConfig.PgBouncerAdminAddr == "" {
+		AppConfig.PgBouncerAdminAddr = fmt.Sprintf(
+			"postgres://%s:%s@%s/pgbouncer",
+			AppConfig.PostgresUser,
+			AppConfig.PostgresPassword,
+			AppConfig.PgBouncerAddr,
+		)
 	}
 
 	if AppConfig.LogInfo {
