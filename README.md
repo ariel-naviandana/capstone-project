@@ -151,6 +151,20 @@ docker compose up --build -d --compatibility
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000
 
+## Unit Testing
+
+Unit test mencakup handler, repository, resilience (circuit breaker & retry), dan backpressure.
+
+### Menjalankan Test
+
+```bash
+# Semua unit test
+go test ./...
+
+# Dengan coverage
+go test -cover ./...
+```
+
 ## Cara Tes Resilience & Observability
 1. **Normal flow**:
    - POST /transactions → cek log API (publish success) & log worker (processed success)
@@ -197,7 +211,7 @@ docker start tx-kafka
 ```
 K6 Testing Result
 
-https://docs.google.com/spreadsheets/d/1MeOlugkW6gw524ed3eTZDOFPl-spz2XyKEeltw5GJrA/edit?usp=sharing
+[Link Google Sheet Hasil Testing K6](https://docs.google.com/spreadsheets/d/1MeOlugkW6gw524ed3eTZDOFPl-spz2XyKEeltw5GJrA/edit?usp=sharing)
 
 ## Observability & SLO Dashboard (Grafana)
 - Prometheus scrape metrics dari endpoint `/metrics` di API
@@ -232,7 +246,6 @@ Dashboard di-export ke `grafana-dashboard.json` supaya bisa di-import ulang di m
 - Observability menggunakan Prometheus + Grafana untuk monitor RPS, latency, error, breaker, cache secara real-time
 
 ## Next Step (Ongoing)
-- Unit Test (handler, repo, resilience)
 - Autentikasi JWT (login + protect endpoint)
 - Tambah endpoint GET /users/:id/transactions (history tx)
 - CI/CD GitHub Actions (test otomatis)

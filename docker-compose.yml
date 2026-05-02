@@ -148,7 +148,14 @@ services:
     image: redis:7
     container_name: tx-redis
     restart: always
-    command: ["redis-server", "--maxmemory", "30mb", "--maxmemory-policy", "allkeys-lru"]
+    command:
+      [
+        "redis-server",
+        "--maxmemory",
+        "30mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
     ports:
       - "6379:6379"
     volumes:
@@ -242,7 +249,7 @@ services:
       - kafka_data:/var/lib/kafka/data
     depends_on:
       zookeeper:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test:
         [
@@ -301,6 +308,8 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/grafana/dashboards:/etc/grafana/dashboards
     depends_on:
       - prometheus
     networks:
