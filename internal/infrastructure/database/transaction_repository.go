@@ -3,8 +3,10 @@ package database
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
@@ -69,6 +71,15 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 }
 
 func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
+	cacheKey := "tx:" + txID
+
+	// Cache-aside: try Redis first (nil-safe for unit tests)
+	if cache.RedisClient != nil {
+		if cached, hit := cache.GetCached[domain.TransactionDetail](ctx, cacheKey); hit {
+			return cached, nil
+		}
+	}
+
 	var detail domain.TransactionDetail
 	query := `
 		SELECT tx_id, id, user_id, COALESCE(recipient_id, 0) as recipient_id, amount, type, status, created_at, updated_at
@@ -94,10 +105,27 @@ func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*do
 		log.Warn().Err(err).Str("tx_id", txID).Msg("GetByTxID failed")
 		return nil, err
 	}
+
+	// Populate cache for next read (non-fatal if Redis is down)
+	if cache.RedisClient != nil {
+		if setErr := cache.SetCache(ctx, cacheKey, result, 300*time.Second); setErr != nil {
+			log.Warn().Err(setErr).Str("tx_id", txID).Msg("GetByTxID: failed to populate cache")
+		}
+	}
+
 	return result, nil
 }
 
 func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64) (*domain.UserBalance, error) {
+	cacheKey := fmt.Sprintf("user_balance:%d", userID)
+
+	// Cache-aside: try Redis first (nil-safe for unit tests)
+	if cache.RedisClient != nil {
+		if cached, hit := cache.GetCached[domain.UserBalance](ctx, cacheKey); hit {
+			return cached, nil
+		}
+	}
+
 	var ub domain.UserBalance
 	query := `
 		SELECT id, username, balance
@@ -119,6 +147,14 @@ func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64
 		log.Warn().Err(err).Int64("user_id", userID).Msg("GetUserBalance failed")
 		return nil, err
 	}
+
+	// Populate cache for next read (non-fatal if Redis is down)
+	if cache.RedisClient != nil {
+		if setErr := cache.SetCache(ctx, cacheKey, result, 60*time.Second); setErr != nil {
+			log.Warn().Err(setErr).Int64("user_id", userID).Msg("GetUserBalance: failed to populate cache")
+		}
+	}
+
 	return result, nil
 }
 
