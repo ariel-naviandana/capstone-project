@@ -241,3 +241,136 @@ Dashboard di-export ke `grafana-dashboard.json` supaya bisa di-import ulang di m
 - Partitioning/Sharding DB
 - Kubernetes Minikube + HPA lokal
 - Cloud Deployment (AWS/GCP)
+
+## Kubernetes Deployment & Testing
+### Prerequisites
+- Docker Desktop atau Docker Engine
+- kubectl (Kubernetes CLI)
+- Minikube (untuk local K8s cluster)
+
+### 1. Install Minikube & kubectl
+```bash
+# Install kubectl (jika belum ada)
+# Windows (via Chocolatey)
+choco install kubernetes-cli
+
+# Atau download manual dari https://kubernetes.io/docs/tasks/tools/
+
+# Install Minikube
+# Windows (via Chocolatey)
+choco install minikube
+
+# Atau download dari https://minikube.sigs.k8s.io/docs/start/
+```
+
+### 2. Start Minikube Cluster
+```bash
+# Start Minikube dengan Docker driver
+minikube start --driver=docker
+
+# Enable ingress addon (untuk expose service)
+minikube addons enable ingress
+
+# Cek status
+minikube status
+kubectl get nodes
+```
+
+### 3. Build Docker Images
+```bash
+# Build images untuk API dan Worker
+docker build -f Dockerfile.api -t capstone-project-api:latest .
+docker build -f Dockerfile.worker -t capstone-project-worker:latest .
+```
+
+### 4. Load Images ke Minikube
+```bash
+# Load images ke Minikube registry
+minikube image load capstone-project-api:latest
+minikube image load capstone-project-worker:latest
+```
+
+### 5. Deploy ke Kubernetes
+```bash
+# Apply semua K8s manifests
+kubectl apply -f k8s/
+
+# Cek deployment status
+kubectl get deployments
+kubectl get pods
+kubectl get services
+kubectl get configmaps
+kubectl get secrets
+kubectl get hpa
+```
+
+### 6. Test Aplikasi
+```bash
+# Forward port untuk akses API (karena service type ClusterIP)
+kubectl port-forward svc/bankx-api 8000:8000
+
+# Test health check
+curl http://localhost:8000/health
+
+# Test transaction
+curl -X POST http://localhost:8000/transactions \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 1, "amount": 100.0, "type": "credit"}'
+
+# Test balance
+curl http://localhost:8000/users/1/balance
+
+# Cek logs
+kubectl logs -f deployment/bankx-api
+kubectl logs -f deployment/bankx-worker
+```
+
+### 7. Monitoring dengan Grafana & Prometheus
+```bash
+# Forward ports untuk akses web UI
+kubectl port-forward svc/prometheus 9090:9090
+kubectl port-forward svc/grafana 3000:3000
+
+# Akses:
+# - Prometheus: http://localhost:9090
+# - Grafana: http://localhost:3000 (user: capstone, pass: admin123)
+
+# Import dashboard dari grafana-dashboard.json
+```
+
+### 8. Load Testing dengan k6
+```bash
+# Jalankan k6 dari lokal (karena Minikube cluster)
+k6 run tests/k6/performance_test.js
+
+# Atau untuk chaos test
+# Stop salah satu service di K8s
+kubectl scale deployment bankx-postgres-primary --replicas=0
+k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=postgres
+kubectl scale deployment bankx-postgres-primary --replicas=1
+```
+
+### 9. Test Scaling & HPA
+```bash
+# Generate load untuk trigger HPA
+k6 run tests/k6/performance_test.js --vus 50 --duration 5m
+
+# Monitor scaling
+kubectl get hpa
+kubectl get pods -l app=bankx-api
+```
+
+### 10. Cleanup
+```bash
+# Stop Minikube
+minikube stop
+
+# Delete cluster (optional)
+minikube delete
+```
+
+### Troubleshooting
+- Jika pod CrashLoopBackOff: `kubectl describe pod <pod-name>` → cek logs & events
+- Jika image tidak ditemukan: Pastikan `minikube image load` berhasil
+- Jika service tidak accessible: Cek `kubectl get endpoints`
+- Untuk debug lebih lanjut: `kubectl exec -it <pod-name> -- /bin/sh`
