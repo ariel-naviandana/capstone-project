@@ -7,7 +7,8 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 - **Database**: PostgreSQL (transaksi utama) + MongoDB (logging & data fleksibel)
 - **Caching & Rate Limiting**: Redis
 - **Message Queue**: Kafka (Confluent)
-- **Resilience**: Circuit Breaker (gobreaker), Retry with Backoff, Batch Processing
+- **Connection Pooler**: PgBouncer (transaction pooling, port 6432)
+- **Resilience**: Circuit Breaker (gobreaker) dengan EOF-aware filtering, Retry with Backoff, Batch Processing
 - **Logging & Observability**: Zerolog (structured JSON) + Trace ID propagation + Prometheus metrics + Grafana dashboard
 - **Deployment**: Docker + Docker Compose (monorepo: API + Worker)
 - **Load & Chaos Testing**: k6 (performance_test.js & chaos_test.js di folder tests/k6/)
@@ -21,8 +22,8 @@ Prototype sistem transaksi user yang scalable, low-latency, dan reliable menggun
 ## Fitur Utama & Resilience
 - Rate limiting per IP/user (Redis)
 - Async processing transaksi via Kafka (producer di API, consumer di Worker)
-- Connection pooling (pgxpool untuk Postgres) dengan Read/Write Separation (Master/Replica)
-- Circuit Breaker di semua external call (Kafka producer/consumer, Postgres, Mongo)
+- Connection pooling berlapis: PgBouncer (transaction mode, max 10.000 client conn) di depan pgxpool (Read/Write Separation Master/Replica)
+- Circuit Breaker di semua external call (Kafka producer/consumer, Postgres, Mongo) dengan filter `io.EOF` agar idle connection re-sync tidak mentrigger breaker trip
 - Retry with exponential backoff untuk transient error
 - Batch processing di Kafka consumer (max 100 concurrent proses event per batch)
 - Structured logging (zerolog JSON) di seluruh flow
@@ -170,12 +171,18 @@ go test -cover ./...
    - POST /transactions → cek log API (publish success) & log worker (processed success)
    - Lihat trace_id sama di log API & worker
 
-2. **Simulasi failure**:
-   - Stop Postgres: `docker stop tx-postgres`
+2. **Simulasi failure — Database**:
+   - Stop Postgres: `docker stop tx-postgres-primary`
    - Spam POST → API return 503 cepat (breaker trip), worker retry lalu skip proses
-   - Start lagi: `docker start tx-postgres` → recovery otomatis
+   - Start lagi: `docker start tx-postgres-primary` → recovery otomatis
 
-3. **Simulasi overload**:
+3. **Simulasi failure — PgBouncer (Connection Pooler)**:
+   - Stop PgBouncer: `docker stop tx-pgbouncer`
+   - API akan return 503 dari breaker; log akan menampilkan EOF error
+   - Start lagi: `docker start tx-pgbouncer`
+   - **Catatan**: Sejak optimasi Phase 2, error `io.EOF` yang muncul saat PgBouncer restart **tidak** mentrigger circuit breaker trip. Sistem membedakan antara "Database Down" (trip) dan "Idle Connection Re-sync / Pooler Restart" (no trip). Observasi di Grafana: `breaker_trips_total` tidak naik saat PgBouncer di-restart.
+
+4. **Simulasi overload**:
    - Gunakan k6 load test (lihat bagian Load Test di bawah)
 
 ## Load & Chaos Testing dengan k6
@@ -188,25 +195,29 @@ Script testing berada di folder `tests/k6/`:
 Cara jalankan (dari root proyek):
 
 ```bash
-# Performance test
-k6 run tests/k6/performance_test.js
+# Performance test — pilih profil dengan TEST_PROFILE
+k6 run -e TEST_PROFILE=smoke  tests/k6/performance_test.js --summary-export=smoke_summary.json
+k6 run -e TEST_PROFILE=load   tests/k6/performance_test.js --summary-export=load_summary.json
+k6 run -e TEST_PROFILE=stress tests/k6/performance_test.js --summary-export=stress_summary.json
+k6 run -e TEST_PROFILE=spike  tests/k6/performance_test.js --summary-export=spike_summary.json
+k6 run -e TEST_PROFILE=soak   tests/k6/performance_test.js --summary-export=soak_summary.json
 ```
 ```bash
-# Chaos test postgre primary down
-docker stop tx-postgre-primary
-k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=postgres
-docker start tx-postgre-primary
+# Chaos test — postgres primary down
+docker stop tx-postgres-primary
+k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=postgres --summary-export=chaos_postgres.json
+docker start tx-postgres-primary
 ```
 ```bash
-# Chaos test redis down
+# Chaos test — redis down
 docker stop tx-redis
-k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=redis
+k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=redis --summary-export=chaos_redis.json
 docker start tx-redis
 ```
 ```bash
-# Chaos test kafka down
+# Chaos test — kafka down
 docker stop tx-kafka
-k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=kafka
+k6 run tests/k6/chaos_test.js --env CHAOS_TARGET=kafka --summary-export=chaos_kafka.json
 docker start tx-kafka
 ```
 K6 Testing Result
@@ -217,10 +228,12 @@ K6 Testing Result
 - Prometheus scrape metrics dari endpoint `/metrics` di API
 - Grafana tampilkan real-time:
   - Requests per Second (RPS)
-  - Latency p95 (threshold red >500ms untuk SLO breach)
+  - Latency p95 (threshold alert merah >500ms untuk SLO breach)
   - Error Rate (%)
-  - Circuit Breaker State & Trips Count
-  - Cache Hit Rate (%)
+  - Circuit Breaker State & Trips Count per komponen (Postgres, Kafka, Mongo)
+  - Cache Hit Rate (%) — Redis cache-aside untuk `GetUserBalance` & `GetByTxID`
+  - **PgBouncer Pool Utilization**: active connections, idle connections, waiting connections per database (`capstone` / `capstone_read`)
+  - pgxpool stats: acquired, idle, total connections per pool (write/read)
 
 Cara akses:
 1. Buka http://localhost:3000
@@ -233,11 +246,12 @@ Cara akses:
 Dashboard di-export ke `grafana-dashboard.json` supaya bisa di-import ulang di mesin lain.
 
 ## SLO Target (Target Capaian)
-- p95 latency < 500ms di normal load
-- Error rate < 1% saat overload/failure
-- Breaker aktif proteksi sistem (fast fail 503)
-- Trace ID konsisten end-to-end
-- Cache hit rate >80% pada read-heavy workload
+- **p95 latency < 500ms** di normal load 
+- Error rate < 1% saat normal load; toleransi < 10% saat chaos (failure injection)
+- Breaker aktif proteksi sistem (fast fail 503); EOF dari PgBouncer **tidak** mentrigger trip
+- Trace ID konsisten end-to-end (API → Kafka header → Worker)
+- Cache hit rate >80% pada read-heavy workload (balance & transaction lookup)
+- PgBouncer pool utilization < 80% dari `default_pool_size` saat peak load
 
 ## Catatan Pengembangan
 - Logging sekarang full zerolog JSON + trace ID propagation
