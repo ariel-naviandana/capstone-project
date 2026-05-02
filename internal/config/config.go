@@ -10,14 +10,16 @@ import (
 
 type Config struct {
 	ServerPort string `mapstructure:"SERVER_PORT"`
-
-	PostgresHost     string `mapstructure:"POSTGRES_HOST"`
-	PostgresPort     string `mapstructure:"POSTGRES_PORT"`
-	PostgresUser     string `mapstructure:"POSTGRES_USER"`
-	PostgresPassword string `mapstructure:"POSTGRES_PASSWORD"`
-	PostgresDBName   string `mapstructure:"POSTGRES_DB"`
-	PgBouncerAddr      string `mapstructure:"PGBOUNCER_ADDR"`
-	PgBouncerAdminAddr string `mapstructure:"PGBOUNCER_ADMIN_ADDR"`
+	
+	PostgresHost        string `mapstructure:"POSTGRES_HOST"`
+    PostgresPort        string `mapstructure:"POSTGRES_PORT"`
+    PostgresReplicaHost string `mapstructure:"POSTGRES_REPLICA_HOST"`
+    PostgresReplicaPort string `mapstructure:"POSTGRES_REPLICA_PORT"`
+    PostgresUser        string `mapstructure:"POSTGRES_USER"`
+    PostgresPassword    string `mapstructure:"POSTGRES_PASSWORD"`
+    PostgresDBName      string `mapstructure:"POSTGRES_DB"`
+    PgBouncerAddr       string `mapstructure:"PGBOUNCER_ADDR"`
+    PgBouncerAdminAddr  string `mapstructure:"PGBOUNCER_ADMIN_ADDR"`
 
 	KafkaBrokers []string `mapstructure:"KAFKA_BROKERS"`
 	KafkaTopic   string   `mapstructure:"KAFKA_TOPIC"`
@@ -55,6 +57,8 @@ func LoadConfig() {
 	// Bind Environment Variables for Viper Unmarshal
 	_ = viper.BindEnv("POSTGRES_HOST")
 	_ = viper.BindEnv("POSTGRES_PORT")
+	_ = viper.BindEnv("POSTGRES_REPLICA_HOST")
+	_ = viper.BindEnv("POSTGRES_REPLICA_PORT")
 	_ = viper.BindEnv("POSTGRES_USER")
 	_ = viper.BindEnv("POSTGRES_PASSWORD")
 	_ = viper.BindEnv("POSTGRES_DB")
