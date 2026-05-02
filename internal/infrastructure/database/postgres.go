@@ -13,19 +13,41 @@ var WritePool *pgxpool.Pool
 var ReadPool *pgxpool.Pool
 
 func ConnectPostgres() {
+	primaryHost := config.AppConfig.PostgresHost
+	if primaryHost == "" {
+		primaryHost = "postgres-primary"
+	}
+	primaryPort := config.AppConfig.PostgresPort
+	if primaryPort == "" {
+		primaryPort = "5432"
+	}
+
+	replicaHost := config.AppConfig.PostgresReplicaHost
+	if replicaHost == "" {
+		if config.AppConfig.PostgresHost != "" {
+			replicaHost = config.AppConfig.PostgresHost
+		} else {
+			replicaHost = "postgres-replica"
+		}
+	}
+	replicaPort := config.AppConfig.PostgresReplicaPort
+	if replicaPort == "" {
+		replicaPort = primaryPort
+	}
+
 	primaryDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=2&pool_max_conn_idle_time=5m",
 		config.AppConfig.PostgresUser,
 		config.AppConfig.PostgresPassword,
-		"postgres-primary", // mapped in docker-compose
-		config.AppConfig.PostgresPort,
+		primaryHost,
+		primaryPort,
 		config.AppConfig.PostgresDBName,
 	)
 
 	replicaDSN := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&pool_max_conns=100&pool_min_conns=2&pool_max_conn_idle_time=5m",
 		config.AppConfig.PostgresUser,
 		config.AppConfig.PostgresPassword,
-		"postgres-replica",            // mapped in docker-compose
-		config.AppConfig.PostgresPort, // internal docker port 5432
+		replicaHost,
+		replicaPort,
 		config.AppConfig.PostgresDBName,
 	)
 
