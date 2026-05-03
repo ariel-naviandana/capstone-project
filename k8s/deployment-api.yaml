@@ -12,6 +12,8 @@ spec:
       labels:
         app: bankx-api
     spec:
+      # preStop (5s) + WriteTimeout Go server (15s) = 20s < 30s → cukup sebelum SIGKILL
+      terminationGracePeriodSeconds: 30
       containers:
       - name: api
         image: capstone-project-api:latest
@@ -30,6 +32,13 @@ spec:
           limits:
             cpu: "700m"
             memory: "300Mi"
+
+        # Sleep 5s memberi waktu iptables/ipvs propagasi endpoint removal
+        # sebelum SIGTERM dikirim ke container → tidak ada dropped connection saat scale-down.
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "5"]
 
         readinessProbe:
           httpGet:
