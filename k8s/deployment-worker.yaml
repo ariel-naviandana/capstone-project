@@ -12,6 +12,7 @@ spec:
       labels:
         app: bankx-worker
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
       - name: worker
         image: capstone-project-worker:latest
@@ -28,3 +29,13 @@ spec:
           limits:
             cpu: "500m"
             memory: "300Mi"
+
+        # Worker tidak punya HTTP server — gunakan exec probe.
+        # stat /proc/1/exe gagal jika PID 1 (main goroutine) sudah exit/crash.
+        livenessProbe:
+          exec:
+            command: ["/bin/sh", "-c", "stat /proc/1/exe > /dev/null 2>&1"]
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
