@@ -5,13 +5,18 @@ metadata:
 data:
   SERVER_PORT: "8000"
   LOG_LEVEL: "info"
+  # Direct Postgres details (fallback jika PGBOUNCER_ADDR dikosongkan)
   POSTGRES_HOST: "host.minikube.internal"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "capstone"
   REDIS_ADDR: "host.minikube.internal:6379"
   REDIS_DB: "0"
   KAFKA_BROKERS: "host.minikube.internal:9092"
+  MONGO_URI: "mongodb://admin:capstone123@host.minikube.internal:27017"
   KAFKA_TOPIC: "transactions"
   KAFKA_GROUP_ID: "worker-group"
   RATE_LIMIT_REQUESTS: "100"
   RATE_LIMIT_WINDOW: "60"
+  # Routes semua koneksi DB melalui in-cluster PgBouncer pooler.
+  # Set ke "" untuk bypass PgBouncer dan koneksi langsung ke Postgres.
+  PGBOUNCER_ADDR: "pgbouncer:6432"
