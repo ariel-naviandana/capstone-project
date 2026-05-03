@@ -294,7 +294,6 @@ services:
     depends_on:
       zookeeper:
         condition: service_started
-        condition: service_started
     healthcheck:
       test:
         [
