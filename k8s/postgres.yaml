@@ -18,12 +18,24 @@ spec:
       - name: postgres
         image: postgres:15-alpine
         env:
+        # Referensi ke Secret agar password konsisten dengan app dan PgBouncer userlist.
+        # PENTING: jika pod sudah pernah init dengan password lama ("postgres"),
+        # hapus pod terlebih dahulu: kubectl delete pod -l app=postgres
         - name: POSTGRES_USER
-          value: "postgres"
+          valueFrom:
+            secretKeyRef:
+              name: bankx-secret
+              key: POSTGRES_USER
         - name: POSTGRES_PASSWORD
-          value: "postgres"
+          valueFrom:
+            secretKeyRef:
+              name: bankx-secret
+              key: POSTGRES_PASSWORD
         - name: POSTGRES_DB
-          value: "capstone"
+          valueFrom:
+            configMapKeyRef:
+              name: bankx-config
+              key: POSTGRES_DB
         ports:
         - containerPort: 5432
         resources:
@@ -33,6 +45,20 @@ spec:
           limits:
             cpu: "500m"
             memory: "512Mi"
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres", "-d", "capstone"]
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 6
+        livenessProbe:
+          exec:
+            command: ["pg_isready", "-U", "postgres", "-d", "capstone"]
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
 
 ---
 apiVersion: v1
