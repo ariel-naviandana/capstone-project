@@ -23,7 +23,7 @@ jobs:
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
-        version: v2.5.0
+        version: latest
         args: --timeout=3m
 
     - name: Run unit tests
