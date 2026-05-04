@@ -51,7 +51,7 @@ func createTopicIfNotExist(broker string, topic string) {
 		log.Warn().Err(err).Str("broker", broker).Msg("Gagal connect ke broker untuk create topic")
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	partitions, err := conn.ReadPartitions(topic)
 	if err == nil && len(partitions) > 0 {
@@ -127,7 +127,9 @@ func PublishTransactionEvent(txID string, accountNo string, recipientNo string, 
 
 func CloseKafkaProducer() {
 	if kafkaWriter != nil {
-		kafkaWriter.Close()
+		if err := kafkaWriter.Close(); err != nil {
+			log.Warn().Err(err).Msg("Gagal menutup Kafka producer")
+		}
 		log.Info().Msg("Kafka producer ditutup")
 	}
 }
@@ -284,8 +286,8 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		UpdatedAt:   eventTime,
 	}
 
-	var newStatus string = "success"
-	var details string = "Processed successfully"
+	newStatus := "success"
+	details := "Processed successfully"
 	// duplicate stays true when ON CONFLICT short-circuits; we then skip
 	// rewriting the cache so the canonical post-commit state from the first
 	// delivery is not clobbered by this redelivery.
@@ -492,7 +494,9 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 func CloseKafkaConsumer() {
 	if kafkaReader != nil {
-		kafkaReader.Close()
+		if err := kafkaReader.Close(); err != nil {
+			log.Warn().Err(err).Msg("Gagal menutup Kafka consumer")
+		}
 		log.Info().Msg("Kafka consumer closed")
 	}
 }

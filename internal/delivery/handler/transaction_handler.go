@@ -17,6 +17,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/capstone-b4/capstone-go/internal/pkg/response"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/gin-gonic/gin"
 )
@@ -63,10 +64,16 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	idemKey := ""
 	if input.RefNo != "" {
 		idemKey = "idem:tx:" + input.RefNo
-		ok, claimErr := cache.RedisClient.SetNX(c.Request.Context(), idemKey, txID, 24*time.Hour).Result()
-		if claimErr != nil {
-			logger.Warn().Err(claimErr).Str("ref_no", input.RefNo).Msg("Idempotency SETNX failed; proceeding without claim")
-		} else if !ok {
+		// SetArgs with Mode "NX" replaces deprecated SetNX. On miss (key
+		// already set), Redis replies nil and the client surfaces redis.Nil.
+		_, claimErr := cache.RedisClient.SetArgs(c.Request.Context(), idemKey, txID, redis.SetArgs{
+			Mode: "NX",
+			TTL:  24 * time.Hour,
+		}).Result()
+		switch {
+		case claimErr == nil:
+			idemClaimed = true
+		case errors.Is(claimErr, redis.Nil):
 			existing, getErr := cache.RedisClient.Get(c.Request.Context(), idemKey).Result()
 			if getErr == nil && existing != "" {
 				logger.Info().Str("ref_no", input.RefNo).Str("existing_tx_id", existing).Msg("Duplicate ref_no; returning existing trx_id")
@@ -76,9 +83,9 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 				}))
 				return
 			}
-			// Race: claim disappeared between SETNX and GET. Treat as new.
-		} else {
-			idemClaimed = true
+			// Race: claim disappeared between SET NX and GET. Treat as new.
+		default:
+			logger.Warn().Err(claimErr).Str("ref_no", input.RefNo).Msg("Idempotency SET NX failed; proceeding without claim")
 		}
 	}
 

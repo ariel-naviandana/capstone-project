@@ -81,7 +81,9 @@ func InitLayers() {
 
 func CloseRedis() {
 	if RedisClient != nil {
-		RedisClient.Close()
+		if err := RedisClient.Close(); err != nil {
+			log.Warn().Err(err).Msg("Gagal menutup koneksi Redis")
+		}
 		log.Info().Msg("Redis disconnected")
 	}
 }

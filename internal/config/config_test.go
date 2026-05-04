@@ -1,21 +1,12 @@
 package config
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestLoadConfig_Defaults(t *testing.T) {
-	// Clear any existing env vars that could affect the test
-	originalPort := os.Getenv("SERVER_PORT")
-	defer func() {
-		if originalPort != "" {
-			os.Setenv("SERVER_PORT", originalPort)
-		}
-	}()
-
 	// Load config (will use env vars or defaults)
 	LoadConfig()
 
@@ -30,24 +21,14 @@ func TestLoadConfig_Defaults(t *testing.T) {
 }
 
 func TestLoadConfig_WithEnvVars(t *testing.T) {
-	// Set environment variables
-	os.Setenv("SERVER_PORT", "9090")
-	os.Setenv("POSTGRES_HOST", "test-host")
-	os.Setenv("POSTGRES_PORT", "5433")
-	os.Setenv("POSTGRES_USER", "testuser")
-	os.Setenv("POSTGRES_PASSWORD", "testpass")
-	os.Setenv("POSTGRES_DB", "testdb")
-	os.Setenv("REDIS_ADDR", "localhost:6380")
-
-	defer func() {
-		os.Unsetenv("SERVER_PORT")
-		os.Unsetenv("POSTGRES_HOST")
-		os.Unsetenv("POSTGRES_PORT")
-		os.Unsetenv("POSTGRES_USER")
-		os.Unsetenv("POSTGRES_PASSWORD")
-		os.Unsetenv("POSTGRES_DB")
-		os.Unsetenv("REDIS_ADDR")
-	}()
+	// t.Setenv auto-restores values after the test
+	t.Setenv("SERVER_PORT", "9090")
+	t.Setenv("POSTGRES_HOST", "test-host")
+	t.Setenv("POSTGRES_PORT", "5433")
+	t.Setenv("POSTGRES_USER", "testuser")
+	t.Setenv("POSTGRES_PASSWORD", "testpass")
+	t.Setenv("POSTGRES_DB", "testdb")
+	t.Setenv("REDIS_ADDR", "localhost:6380")
 
 	LoadConfig()
 
