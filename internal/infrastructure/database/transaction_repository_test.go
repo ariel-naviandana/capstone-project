@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
 	"github.com/stretchr/testify/assert"
@@ -87,6 +88,145 @@ func TestTransactionRepository_GetAccountTransactions(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Len(t, txs, 0)
+		assert.NoError(t, mockPool.ExpectationsWereMet())
+	})
+}
+
+// ==================== TEST Create METHOD ====================
+
+func TestTransactionRepository_Create(t *testing.T) {
+	mockPool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("failed to open mock db: %v", err)
+	}
+	defer mockPool.Close()
+
+	repo := NewTransactionRepository(mockPool, mockPool)
+	ctx := context.Background()
+
+	t.Run("Success - Create Deposit", func(t *testing.T) {
+		input := &domain.TransactionCreate{
+			UserID: 1,
+			Amount: 50000,
+			Type:   "deposit",
+		}
+
+		mockPool.ExpectQuery(`INSERT INTO transactions`).
+			WithArgs(input.UserID, int64(0), input.Amount, input.Type, input.Description).
+			WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(1)))
+
+		id, err := repo.Create(ctx, input)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), id)
+		assert.NoError(t, mockPool.ExpectationsWereMet())
+	})
+
+	t.Run("Success - Create Transfer", func(t *testing.T) {
+		input := &domain.TransactionCreate{
+			UserID:      1,
+			RecipientID: 2,
+			Amount:      50000,
+			Type:        "transfer",
+		}
+
+		mockPool.ExpectQuery(`INSERT INTO transactions`).
+			WithArgs(input.UserID, input.RecipientID, input.Amount, input.Type, input.Description).
+			WillReturnRows(pgxmock.NewRows([]string{"id"}).AddRow(int64(2)))
+
+		id, err := repo.Create(ctx, input)
+
+		assert.NoError(t, err)
+		assert.Equal(t, int64(2), id)
+		assert.NoError(t, mockPool.ExpectationsWereMet())
+	})
+
+	t.Run("Error - Database Failure", func(t *testing.T) {
+		input := &domain.TransactionCreate{
+			UserID: 1,
+			Amount: 50000,
+			Type:   "deposit",
+		}
+
+		mockPool.ExpectQuery(`INSERT INTO transactions`).
+			WithArgs(input.UserID, int64(0), input.Amount, input.Type, input.Description).
+			WillReturnError(pgx.ErrTxClosed)
+
+		id, err := repo.Create(ctx, input)
+
+		assert.Error(t, err)
+		assert.Equal(t, int64(0), id)
+		assert.Contains(t, err.Error(), "failed to insert transaction")
+		assert.NoError(t, mockPool.ExpectationsWereMet())
+	})
+}
+
+// ==================== TEST GetByTxID METHOD ====================
+
+func TestTransactionRepository_GetByTxID(t *testing.T) {
+	mockPool, err := pgxmock.NewPool()
+	if err != nil {
+		t.Fatalf("failed to open mock db: %v", err)
+	}
+	defer mockPool.Close()
+
+	repo := NewTransactionRepository(mockPool, mockPool)
+	ctx := context.Background()
+
+	t.Run("Success - Transaction Found", func(t *testing.T) {
+		txID := "tx-123"
+		now := time.Now()
+
+		rows := pgxmock.NewRows([]string{
+			"tx_id", "id", "user_id", "recipient_id",
+			"amount", "type", "status", "created_at", "updated_at",
+		}).AddRow(txID, int64(10), int64(1), int64(2), float64(50000), "transfer", "success", now, now)
+
+		mockPool.ExpectQuery(`SELECT tx_id, id, user_id, COALESCE\(recipient_id, 0\) as recipient_id, amount, type, status, created_at, updated_at FROM transactions WHERE tx_id = \$1`).
+			WithArgs(txID).
+			WillReturnRows(rows)
+
+		result, err := repo.GetByTxID(ctx, txID)
+
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, txID, result.TxID)
+		assert.Equal(t, int64(10), result.ID)
+		assert.Equal(t, int64(1), result.UserID)
+		assert.Equal(t, int64(2), result.RecipientID)
+		assert.Equal(t, float64(50000), result.Amount)
+		assert.Equal(t, "transfer", result.Type)
+		assert.Equal(t, "success", result.Status)
+		assert.NoError(t, mockPool.ExpectationsWereMet())
+	})
+
+	t.Run("Error - Transaction Not Found", func(t *testing.T) {
+		txID := "tx-notfound"
+
+		mockPool.ExpectQuery(`SELECT tx_id, id, user_id, COALESCE\(recipient_id, 0\) as recipient_id, amount, type, status, created_at, updated_at FROM transactions WHERE tx_id = \$1`).
+			WithArgs(txID).
+			WillReturnError(pgx.ErrNoRows)
+
+		result, err := repo.GetByTxID(ctx, txID)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "transaction not found")
+		assert.NoError(t, mockPool.ExpectationsWereMet())
+	})
+
+	t.Run("Error - Database Failure", func(t *testing.T) {
+		txID := "tx-456"
+
+		mockPool.ExpectQuery(`SELECT tx_id, id, user_id, COALESCE\(recipient_id, 0\) as recipient_id, amount, type, status, created_at, updated_at FROM transactions WHERE tx_id = \$1`).
+			WithArgs(txID).
+			WillReturnError(pgx.ErrTxClosed)
+
+		result, err := repo.GetByTxID(ctx, txID)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "failed to get transaction")
 		assert.NoError(t, mockPool.ExpectationsWereMet())
 	})
 }
