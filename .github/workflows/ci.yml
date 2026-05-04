@@ -21,12 +21,10 @@ jobs:
       run: go mod download
 
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
+        version: v2.5.0
         args: --timeout=3m
-        # Hanya log error saja, tidak menggagalkan di tahap ini jika preferensi
-        # Tapi umumnya CI akan gagal jika lint error
-        
+
     - name: Run unit tests
       run: go test ./... -v -race
