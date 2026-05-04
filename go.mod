@@ -1,8 +1,6 @@
 module github.com/capstone-b4/capstone-go
 
-go 1.24
-
-toolchain go1.25.0
+go 1.25.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0

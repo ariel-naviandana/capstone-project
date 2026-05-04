@@ -140,7 +140,7 @@ func TestTransactionHandler_CreateTransaction(t *testing.T) {
 	// ==================== TAMBAHAN ====================
 
 	t.Run("Error - Self Transfer Not Allowed", func(t *testing.T) {
-		body := []byte(`{"user_id":1,"recipient_id":1,"amount":50000,"type":"transfer"}`)
+		body := []byte(`{"account_no":"ACC-1","recipient_no":"ACC-1","amount":50000,"type":"transfer"}`)
 		req, _ := http.NewRequest(http.MethodPost, "/transactions", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
@@ -148,11 +148,11 @@ func TestTransactionHandler_CreateTransaction(t *testing.T) {
 		router.ServeHTTP(resp, req)
 
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
-		assert.Contains(t, resp.Body.String(), "tidak bisa transfer ke diri sendiri")
+		assert.Contains(t, resp.Body.String(), "rekening sendiri")
 	})
 
 	t.Run("Error - Invalid JSON Format", func(t *testing.T) {
-		body := []byte(`{"user_id":1, "amount":}`) // Malformed JSON
+		body := []byte(`{"account_no":"ACC-1", "amount":}`) // Malformed JSON
 		req, _ := http.NewRequest(http.MethodPost, "/transactions", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp := httptest.NewRecorder()
@@ -168,25 +168,6 @@ func TestTransactionHandler_CreateTransaction(t *testing.T) {
 	// yang menggunakan type parameter (generics).
 }
 
-// ==================== GET USER BALANCE - ADDITIONAL TESTS ====================
-
-func TestTransactionHandler_GetUserBalance_UserNotFound(t *testing.T) {
-	router, mockRepo, mr := setupTestServer()
-	defer mr.Close()
-
-	// Ganti assert.AnError dengan error yang mengandung "user not found"
-	mockRepo.On("GetUserBalance", mock.Anything, int64(999)).Return(nil, errors.New("user not found")).Once()
-
-	req, _ := http.NewRequest(http.MethodGet, "/users/999/balance", nil)
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	assert.Equal(t, http.StatusNotFound, resp.Code)
-	assert.Contains(t, resp.Body.String(), "User not found")
-	mockRepo.AssertExpectations(t)
-}
-
 // ==================== GET TRANSACTION BY ID TESTS ====================
 
 func TestTransactionHandler_GetByTxID_CacheHit(t *testing.T) {
@@ -194,16 +175,13 @@ func TestTransactionHandler_GetByTxID_CacheHit(t *testing.T) {
 	defer mr.Close()
 
 	txID := "tx-123"
-	cacheKey := "tx:" + txID
-
 	cachedTx := &domain.TransactionDetail{
-		TxID:   txID,
+		TrxID:  txID,
 		Status: "pending",
 		Amount: 50000,
 	}
 
-	err := cache.SetCache(context.Background(), cacheKey, cachedTx, time.Minute)
-	assert.NoError(t, err)
+	cache.TxLayer.WriteThrough(context.Background(), txID, cachedTx)
 
 	req, _ := http.NewRequest(http.MethodGet, "/transactions/"+txID, nil)
 	resp := httptest.NewRecorder()
@@ -212,7 +190,6 @@ func TestTransactionHandler_GetByTxID_CacheHit(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Contains(t, resp.Body.String(), "pending")
-	// Mock repo tidak boleh dipanggil karena cache hit
 	mockRepo.AssertNotCalled(t, "GetByTxID")
 }
 
@@ -222,7 +199,7 @@ func TestTransactionHandler_GetByTxID_CacheMiss_TransactionFound(t *testing.T) {
 
 	txID := "tx-456"
 	expectedTx := &domain.TransactionDetail{
-		TxID:   txID,
+		TrxID:  txID,
 		Status: "success",
 		Amount: 100000,
 	}
@@ -245,7 +222,6 @@ func TestTransactionHandler_GetByTxID_TransactionNotFound(t *testing.T) {
 
 	txID := "tx-notfound"
 
-	// Ganti assert.AnError dengan error yang mengandung "not found"
 	mockRepo.On("GetByTxID", mock.Anything, txID).Return(nil, errors.New("transaction not found")).Once()
 
 	req, _ := http.NewRequest(http.MethodGet, "/transactions/"+txID, nil)
@@ -253,48 +229,8 @@ func TestTransactionHandler_GetByTxID_TransactionNotFound(t *testing.T) {
 
 	router.ServeHTTP(resp, req)
 
-	// Handler mengembalikan 200 dengan status "processing" untuk transaksi yang belum ada
+	// Handler returns 200 with status "processing" when tx not yet in DB
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Contains(t, resp.Body.String(), "processing")
-	mockRepo.AssertExpectations(t)
-}
-
-// ==================== GET USER TRANSACTIONS - ADDITIONAL TESTS ====================
-
-func TestTransactionHandler_GetUserTransactions_CustomPagination(t *testing.T) {
-	router, mockRepo, mr := setupTestServer()
-	defer mr.Close()
-
-	expectedTx := []*domain.TransactionDetail{
-		{ID: 1, Amount: 100},
-	}
-
-	// Custom pagination: limit=5, offset=10
-	mockRepo.On("GetUserTransactions", mock.Anything, int64(2), 5, 10).Return(expectedTx, nil).Once()
-
-	req, _ := http.NewRequest(http.MethodGet, "/users/2/transactions?limit=5&offset=10", nil)
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	assert.Equal(t, http.StatusOK, resp.Code)
-	mockRepo.AssertExpectations(t)
-}
-
-func TestTransactionHandler_GetUserTransactions_InvalidPagination(t *testing.T) {
-	router, mockRepo, mr := setupTestServer()
-	defer mr.Close()
-
-	expectedTx := []*domain.TransactionDetail{} // empty
-
-	// Invalid limit/offset -> fallback ke default (limit=10, offset=0)
-	mockRepo.On("GetUserTransactions", mock.Anything, int64(2), 10, 0).Return(expectedTx, nil).Once()
-
-	req, _ := http.NewRequest(http.MethodGet, "/users/2/transactions?limit=-5&offset=abc", nil)
-	resp := httptest.NewRecorder()
-
-	router.ServeHTTP(resp, req)
-
-	assert.Equal(t, http.StatusOK, resp.Code)
 	mockRepo.AssertExpectations(t)
 }
