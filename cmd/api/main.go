@@ -74,9 +74,20 @@ func main() {
 	r := gin.New()
 	r.Use(middleware.CustomRecovery())
 
-	// Melindungi container dari goroutine leak saat DDOS (Limit 100 request concurrent / fail-fast)
-	middleware.InitDDosShield(100)
-	r.Use(middleware.DDosShield())
+	// APP_ENV=test/perf disables protective middleware so k6 can drive real
+	// load against the app. Anything else keeps shield + rate limiter active.
+	isTestEnv := config.AppConfig.IsTestEnv()
+	if isTestEnv {
+		log.Warn().Str("app_env", config.AppConfig.AppEnv).Msg("Test/perf mode: DDoS shield + rate limiter DISABLED")
+	} else {
+		shieldCap := config.AppConfig.ShieldMaxInflight
+		if shieldCap <= 0 {
+			shieldCap = 100
+		}
+		middleware.InitDDosShield(shieldCap)
+		r.Use(middleware.DDosShield())
+		log.Info().Int("shield_max_inflight", shieldCap).Msg("DDoS shield enabled")
+	}
 
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
@@ -94,31 +105,13 @@ func main() {
 
 	r.Use(requestid.New())
 
-	// Inisialisasi Asynchronous UUID Pre-Generator Pool untuk ultra-low latency
-	uuidPool := make(chan string, 10000)
-	for i := 0; i < 3; i++ { // 3 Worker mempercepat pengisian
-		go func() {
-			for {
-				uuidPool <- uuid.New().String()
-			}
-		}()
-	}
-
+	// Trace ID is supplied by gin-contrib/requestid (UUID v4). Falls back to
+	// a fresh uuid only if the upstream middleware didn't set one.
 	r.Use(func(c *gin.Context) {
 		reqID := requestid.Get(c)
 		if reqID == "" {
-			select {
-			case reqID = <-uuidPool:
-			default:
-				// Fallback jika semua worker uuid sibuk dan antrean pool kosong
-				reqID = uuid.New().String()
-			}
+			reqID = uuid.NewString()
 		}
-
-		log.Debug().
-			Str("generated_trace_id", reqID).
-			Str("path", c.Request.URL.Path).
-			Msg("Trace ID generated for request")
 
 		requestLogger := log.With().
 			Str("trace_id", reqID).
@@ -133,12 +126,14 @@ func main() {
 	})
 
 	apiGroup := r.Group("/")
-	apiGroup.Use(middleware.RateLimiter())
+	if !isTestEnv {
+		apiGroup.Use(middleware.RateLimiter())
+	}
 	{
 		apiGroup.POST("/transactions", txHandler.Create)
 		apiGroup.GET("/transactions/:txId", txHandler.GetByTxID)
-		apiGroup.GET("/users/:id/balance", txHandler.GetUserBalance)
-		apiGroup.GET("/users/:id/transactions", txHandler.GetUserTransactions)
+		apiGroup.GET("/accounts/:accountNo/balance", txHandler.GetAccountBalance)
+		apiGroup.GET("/accounts/:accountNo/transactions", txHandler.GetAccountTransactions)
 	}
 
 	r.GET("/health", func(c *gin.Context) {

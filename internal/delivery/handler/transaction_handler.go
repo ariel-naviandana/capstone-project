@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,10 +12,12 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/capstone-b4/capstone-go/internal/pkg/response"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,19 +42,52 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		return
 	}
 
-	if input.Type == "transfer" && input.RecipientID == 0 {
-		logger.Warn().Msg("Missing recipient_id for transfer")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "recipient_id wajib untuk transfer", ""))
+	if input.Type == "transfer" && input.RecipientNo == "" {
+		logger.Warn().Msg("Missing recipient_no for transfer")
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "recipient_no wajib untuk transfer", ""))
 		return
 	}
 
-	if input.Type == "transfer" && input.UserID == input.RecipientID {
+	if input.Type == "transfer" && input.AccountNo == input.RecipientNo {
 		logger.Warn().Msg("Self-transfer not allowed")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "tidak bisa transfer ke diri sendiri", ""))
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "tidak bisa transfer ke rekening sendiri", ""))
 		return
 	}
 
-	txID := uuid.New().String()
+	txID := "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
+
+	// Idempotency-by-ref_no: when the client supplies ref_no, claim
+	// idem:<ref_no> -> trx_id in Redis with SETNX. A retry of the same ref_no
+	// returns the previously-issued trx_id instead of producing a duplicate
+	// transaction. Empty ref_no means the client is opting out of dedup.
+	idemClaimed := false
+	idemKey := ""
+	if input.RefNo != "" {
+		idemKey = "idem:tx:" + input.RefNo
+		// SetArgs with Mode "NX" replaces deprecated SetNX. On miss (key
+		// already set), Redis replies nil and the client surfaces redis.Nil.
+		_, claimErr := cache.RedisClient.SetArgs(c.Request.Context(), idemKey, txID, redis.SetArgs{
+			Mode: "NX",
+			TTL:  24 * time.Hour,
+		}).Result()
+		switch {
+		case claimErr == nil:
+			idemClaimed = true
+		case errors.Is(claimErr, redis.Nil):
+			existing, getErr := cache.RedisClient.Get(c.Request.Context(), idemKey).Result()
+			if getErr == nil && existing != "" {
+				logger.Info().Str("ref_no", input.RefNo).Str("existing_tx_id", existing).Msg("Duplicate ref_no; returning existing trx_id")
+				c.JSON(http.StatusOK, response.SuccessJSON("Transaksi dengan ref_no ini sudah pernah diterima", gin.H{
+					"trx_id":     existing,
+					"idempotent": true,
+				}))
+				return
+			}
+			// Race: claim disappeared between SET NX and GET. Treat as new.
+		default:
+			logger.Warn().Err(claimErr).Str("ref_no", input.RefNo).Msg("Idempotency SET NX failed; proceeding without claim")
+		}
+	}
 
 	traceID := c.GetString("trace_id")
 	_, err := resilience.ExecuteWithBreaker(
@@ -58,10 +95,18 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		resilience.KafkaProducerBreaker,
 		"KafkaPublish",
 		func() (struct{}, error) {
-			return struct{}{}, queue.PublishTransactionEvent(txID, input.UserID, input.RecipientID, input.Amount, input.Type, traceID)
+			return struct{}{}, queue.PublishTransactionEvent(txID, input.AccountNo, input.RecipientNo, input.Amount, input.Type, input.RefNo, traceID)
 		},
 	)
 	if err != nil {
+		// Roll back the idempotency claim so the client can retry without
+		// being told their tx is "already processed" when nothing was queued.
+		if idemClaimed {
+			if delErr := cache.RedisClient.Del(c.Request.Context(), idemKey).Err(); delErr != nil {
+				logger.Warn().Err(delErr).Str("ref_no", input.RefNo).Msg("Failed to release idempotency claim after publish failure")
+			}
+		}
+		observability.RequestsRejectedTotal.WithLabelValues("breaker", "/transactions").Inc()
 		logger.Warn().
 			Err(err).
 			Str("tx_id", txID).
@@ -75,15 +120,8 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		return
 	}
 
-	logger.Info().
-		Str("tx_id", txID).
-		Str("type", input.Type).
-		Int64("user_id", input.UserID).
-		Float64("amount", input.Amount).
-		Msg("Transaction accepted and published to Kafka")
-
 	c.JSON(http.StatusAccepted, response.SuccessJSON("Transaksi diterima dan akan diproses async (status pending)", gin.H{
-		"id": txID,
+		"trx_id": txID,
 	}))
 }
 
@@ -91,28 +129,29 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
 	txID := c.Param("txId")
-	cacheKey := "tx:" + txID
 
-	if cached, found := cache.GetCached[domain.TransactionDetail](c.Request.Context(), cacheKey); found {
-		logger.Info().
-			Str("tx_id", txID).
-			Str("status", cached.Status).
-			Msg("GET /transactions → CACHE HIT (Redis)")
-		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
-		return
-	}
+	detail, bytes, err := cache.TxLayer.GetOrFetch(c.Request.Context(), txID,
+		func(ctx context.Context) (*domain.TransactionDetail, error) {
+			d, ferr := h.service.GetByTxID(ctx, txID)
+			if ferr != nil && (strings.Contains(ferr.Error(), "transaction not found") || strings.Contains(ferr.Error(), "no rows")) {
+				return nil, cache.ErrNotFound
+			}
+			return d, ferr
+		},
+	)
 
-	logger.Info().
-		Str("tx_id", txID).
-		Msg("GET /transactions → CACHE MISS, cek ke PostgreSQL")
-
-	detail, err := h.service.GetByTxID(c.Request.Context(), txID)
 	if err != nil {
+		if errors.Is(err, cache.ErrNotFound) {
+			// Tx hasn't landed in DB yet — worker may still be processing.
+			c.JSON(http.StatusOK, response.SuccessJSON("Transaksi sedang diproses, coba lagi dalam beberapa detik", gin.H{
+				"trx_id": txID,
+				"status": "processing",
+			}))
+			return
+		}
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
-			logger.Warn().
-				Err(err).
-				Str("tx_id", txID).
-				Msg("Breaker reject di GetByTxID")
+			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/transactions/:txId").Inc()
+			logger.Warn().Err(err).Str("tx_id", txID).Msg("Breaker reject di GetByTxID")
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(
 				response.ErrServiceUnavailable,
 				"Sistem sedang overload atau database sibuk (transaksi sedang diproses)",
@@ -120,74 +159,45 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 			))
 			return
 		}
-
-		if strings.Contains(err.Error(), "transaction not found") || strings.Contains(err.Error(), "no rows") {
-			logger.Info().
-				Str("tx_id", txID).
-				Msg("Transaction belum ada di DB, masih processing")
-			c.JSON(http.StatusOK, response.SuccessJSON("Transaksi sedang diproses, coba lagi dalam beberapa detik", gin.H{
-				"tx_id":  txID,
-				"status": "processing",
-			}))
-			return
-		}
-
-		logger.Error().
-			Err(err).
-			Str("tx_id", txID).
-			Msg("Gagal query DB untuk transaction")
+		logger.Error().Err(err).Str("tx_id", txID).Msg("Gagal query DB untuk transaction")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Failed to get transaction", err.Error()))
 		return
 	}
 
-	if err := cache.SetCache(c.Request.Context(), cacheKey, detail, 5*time.Minute); err != nil {
-		logger.Warn().Err(err).Str("tx_id", txID).Msg("Failed to set transaction cache")
+	if bytes != nil {
+		c.Data(http.StatusOK, "application/json; charset=utf-8", buildSuccessBody(bytes))
+		return
 	}
-
-	logger.Info().
-		Str("tx_id", txID).
-		Str("status", detail.Status).
-		Msg("GET /transactions → success from PostgreSQL")
-
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", detail))
 }
 
-func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
+func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
-	userIDStr := c.Param("id")
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		logger.Warn().
-			Err(err).
-			Str("user_id_str", userIDStr).
-			Msg("Invalid user ID")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid user ID", ""))
+	accountNo := c.Param("accountNo")
+	if accountNo == "" {
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
 		return
 	}
 
-	cacheKey := "user_balance:" + userIDStr
+	balance, bytes, err := cache.BalanceLayer.GetOrFetch(c.Request.Context(), accountNo,
+		func(ctx context.Context) (*domain.AccountBalance, error) {
+			b, ferr := h.service.GetAccountBalance(ctx, accountNo)
+			if ferr != nil && strings.Contains(ferr.Error(), "account not found") {
+				return nil, cache.ErrNotFound
+			}
+			return b, ferr
+		},
+	)
 
-	if cached, found := cache.GetCached[domain.UserBalance](c.Request.Context(), cacheKey); found {
-		logger.Info().
-			Int64("user_id", userID).
-			Float64("balance", cached.Balance).
-			Msg("GET /users/:id/balance → CACHE HIT (Redis)")
-		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
-		return
-	}
-
-	logger.Info().
-		Int64("user_id", userID).
-		Msg("GET /users/:id/balance → CACHE MISS, ambil dari PostgreSQL")
-
-	balance, err := h.service.GetUserBalance(c.Request.Context(), userID)
 	if err != nil {
+		if errors.Is(err, cache.ErrNotFound) {
+			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "Account not found", ""))
+			return
+		}
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
-			logger.Warn().
-				Err(err).
-				Int64("user_id", userID).
-				Msg("Breaker reject di GetUserBalance")
+			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/accounts/:accountNo/balance").Inc()
+			logger.Warn().Err(err).Str("account_no", accountNo).Msg("Breaker reject di GetAccountBalance")
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(
 				response.ErrServiceUnavailable,
 				"Sistem sedang overload atau database sibuk (Saldo sedang diproses)",
@@ -195,43 +205,42 @@ func (h *TransactionHandler) GetUserBalance(c *gin.Context) {
 			))
 			return
 		}
-
-		if strings.Contains(err.Error(), "user not found") {
-			logger.Info().
-				Int64("user_id", userID).
-				Msg("User not found")
-			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "User not found", ""))
-			return
-		}
-
-		logger.Error().
-			Err(err).
-			Int64("user_id", userID).
-			Msg("Gagal get balance user")
+		logger.Error().Err(err).Str("account_no", accountNo).Msg("Gagal get balance account")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Failed to get balance", err.Error()))
 		return
 	}
 
-	if err := cache.SetCache(c.Request.Context(), cacheKey, balance, 10*time.Minute); err != nil {
-		logger.Warn().Err(err).Int64("user_id", userID).Msg("Failed to set balance cache")
+	if bytes != nil {
+		// Fast path: pre-marshaled balance body is already in cache, so we
+		// only have to splice it into the success envelope. Skips the
+		// per-request domain.AccountBalance -> JSON encode entirely.
+		c.Data(http.StatusOK, "application/json; charset=utf-8", buildSuccessBody(bytes))
+		return
 	}
-
-	logger.Info().
-		Int64("user_id", userID).
-		Float64("balance", balance.Balance).
-		Msg("GET /users/:id/balance → success from PostgreSQL")
-
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", balance))
 }
 
-func (h *TransactionHandler) GetUserTransactions(c *gin.Context) {
+// successPrefix / successSuffix surround the cached data bytes to produce the
+// same wire format as response.SuccessResponse{Message: "Succeed", Data: ...}.
+var (
+	successPrefix = []byte(`{"message":"Succeed","data":`)
+	successSuffix = []byte(`}`)
+)
+
+func buildSuccessBody(data []byte) []byte {
+	out := make([]byte, 0, len(successPrefix)+len(data)+len(successSuffix))
+	out = append(out, successPrefix...)
+	out = append(out, data...)
+	out = append(out, successSuffix...)
+	return out
+}
+
+func (h *TransactionHandler) GetAccountTransactions(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
-	userIDStr := c.Param("id")
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		logger.Warn().Err(err).Str("user_id_str", userIDStr).Msg("Invalid user ID")
-		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid user ID", ""))
+	accountNo := c.Param("accountNo")
+	if accountNo == "" {
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
 		return
 	}
 
@@ -247,29 +256,26 @@ func (h *TransactionHandler) GetUserTransactions(c *gin.Context) {
 		offset = 0
 	}
 
-	// Cache short-lived (opsional)
-	cacheKey := "list_tx:" + userIDStr + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	cacheKey := "list_tx:" + accountNo + "?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
 	if cached, found := cache.GetCached[[]*domain.TransactionDetail](c.Request.Context(), cacheKey); found {
-		logger.Info().Int64("user_id", userID).Msg("GET /users/:id/transactions → CACHE HIT")
 		c.JSON(http.StatusOK, response.SuccessJSON("Succeed", cached))
 		return
 	}
 
-	logger.Info().Int64("user_id", userID).Msg("GET /users/:id/transactions → CACHE MISS")
-	transactions, err := h.service.GetUserTransactions(c.Request.Context(), userID, limit, offset)
+	transactions, err := h.service.GetAccountTransactions(c.Request.Context(), accountNo, limit, offset)
 	if err != nil {
 		if strings.Contains(err.Error(), "circuit breaker") || strings.Contains(err.Error(), "rejected") {
+			observability.RequestsRejectedTotal.WithLabelValues("breaker", "/accounts/:accountNo/transactions").Inc()
 			c.JSON(http.StatusServiceUnavailable, response.ErrorJSON(response.ErrServiceUnavailable, "Sistem overload", err.Error()))
 			return
 		}
-		logger.Error().Err(err).Int64("user_id", userID).Msg("Failed to list user transactions")
+		logger.Error().Err(err).Str("account_no", accountNo).Msg("Failed to list account transactions")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Gagal mengambil daftar transaksi", err.Error()))
 		return
 	}
 
-	// Set cache dgn TTL sangat pendek agar tdk terlalu basi, tapi melindung DB dari refresh-spam user
 	if err := cache.SetCache(c.Request.Context(), cacheKey, transactions, 15*time.Second); err != nil {
-		logger.Warn().Err(err).Int64("user_id", userID).Msg("Failed to set transactions list cache")
+		logger.Warn().Err(err).Str("account_no", accountNo).Msg("Failed to set transactions list cache")
 	}
 
 	c.JSON(http.StatusOK, response.SuccessJSON("Succeed", transactions))

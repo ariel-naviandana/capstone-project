@@ -40,21 +40,22 @@ export const options = {
 // HELPER & BEHAVIOR
 // =========================================================================
 
-function generateHeaders(userId) {
+function generateHeaders(accountNo) {
     return {
         'Content-Type': 'application/json',
-        'X-User-ID': userId.toString(),
+        'X-Account-No': accountNo,
         'Accept': 'application/json',
         'User-Agent': `k6-Chaos-Test/1.0 (VU: ${__VU}, Chaos: ${CHAOS_TARGET})`,
     };
 }
 
 function chaosUser(userId) {
-    const params = { headers: generateHeaders(userId) };
+    const accountNo = `123-456-${userId.toString().padStart(6, '0')}`;
+    const params = { headers: generateHeaders(accountNo) };
 
     // 70% GET balance (read)
     if (Math.random() < 0.7) {
-        const res = http.get(`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+        const res = http.get(`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(res.timings.duration);
         check(res, { 'status 200 or 503': (r) => r.status === 200 || r.status === 503 });
         errorRate.add(res.status >= 500 && res.status !== 503);
@@ -66,7 +67,7 @@ function chaosUser(userId) {
         const amount = randomIntBetween(10, 1000);
 
         const payload = JSON.stringify({
-            user_id: userId,
+            account_no: accountNo,
             amount: amount,
             type: type,
             description: `Chaos test ${type} (${CHAOS_TARGET})`,

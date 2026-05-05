@@ -1,3 +1,27 @@
+# =============================================================================
+# Total resource budget across all services (sum of `deploy.resources.limits`):
+#
+#   Service             CPU     Memory
+#   ------------------  ------  --------
+#   api                  2.0     512 MB
+#   worker               1.0     384 MB
+#   postgres-primary     2.0    1024 MB
+#   postgres-replica     1.5     768 MB
+#   redis                0.5     256 MB
+#   mongo                0.2     350 MB
+#   zookeeper            0.2     256 MB
+#   kafka                1.5     768 MB
+#   prometheus           0.1     128 MB
+#   grafana              0.1     128 MB
+#   ------------------  ------  --------
+#   TOTAL                9.1    ~4.5 GB
+#
+# Plan for at least 10 logical CPU cores and 6 GB RAM available to Docker
+# (limits are caps, not reservations — but on a saturated host you want
+# headroom for the kernel, the Docker daemon, and bursty containers).
+# On Docker Desktop (Windows/macOS), set Resources -> CPUs >= 10, Memory >= 6 GB.
+# =============================================================================
+
 services:
   api:
     build:
@@ -20,11 +44,15 @@ services:
       - .env
     networks:
       - app-network
+    # Resource limits raised for k6 load testing. Original: 0.7 CPU / 150M.
+    # The API is the hot path — under thousands of TPS with 0.7 CPU it
+    # spends most of its time waiting for the scheduler. Tune down if your
+    # host has less headroom (Docker Desktop on Windows / WSL2 honors these).
     deploy:
       resources:
         limits:
-          cpus: "0.7"
-          memory: 150M
+          cpus: "2.0"
+          memory: 512M
 
   worker:
     build:
@@ -43,11 +71,12 @@ services:
       - .env
     networks:
       - app-network
+    # Worker bumped from 0.5/150M for parallel Kafka batch processing.
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 150M
+          cpus: "1.0"
+          memory: 384M
 
   postgres-primary:
     image: postgres:18
@@ -89,11 +118,13 @@ services:
       start_period: 30s
     networks:
       - app-network
+    # Postgres primary bumped from 0.9/256M. Writes from the worker + reads
+    # that miss the cache all funnel here, so it's the second-tier bottleneck.
     deploy:
       resources:
         limits:
-          cpus: "0.9"
-          memory: 256M
+          cpus: "2.0"
+          memory: 1024M
 
   postgres-replica:
     image: postgres:18
@@ -138,24 +169,19 @@ services:
       start_period: 120s
     networks:
       - app-network
+    # Replica bumped from 0.5/256M. Serves all GET-balance / GET-tx reads.
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.5"
+          memory: 768M
 
   redis:
     image: redis:7
     container_name: tx-redis
     restart: always
-    command:
-      [
-        "redis-server",
-        "--maxmemory",
-        "30mb",
-        "--maxmemory-policy",
-        "allkeys-lru",
-      ]
+    # maxmemory raised so balance/tx caches actually have room to live.
+    command: ["redis-server", "--maxmemory", "200mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
       - "6379:6379"
     volumes:
@@ -167,11 +193,13 @@ services:
       retries: 5
     networks:
       - app-network
+    # Redis bumped from 0.1/50M. Every request hits it (rate-limit + cache),
+    # and 0.1 CPU was the silent killer of p95 latency under load.
     deploy:
       resources:
         limits:
-          cpus: "0.1"
-          memory: 50M
+          cpus: "0.5"
+          memory: 256M
 
   mongo:
     image: mongo:7
@@ -263,11 +291,12 @@ services:
       retries: 5
     networks:
       - app-network
+    # Kafka bumped from 0.7/512M. Sits on the POST hot path via async producer.
     deploy:
       resources:
         limits:
-          cpus: "0.7"
-          memory: 512M
+          cpus: "1.5"
+          memory: 768M
   prometheus:
     image: prom/prometheus:v2.52.0
     container_name: prometheus

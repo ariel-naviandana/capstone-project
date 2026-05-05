@@ -2,6 +2,7 @@ package logging
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,19 +19,23 @@ func InitLogger() {
 	log.Logger = log.Output(output).With().Caller().Logger()
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
 
-	levelStr := os.Getenv("LOG_LEVEL")
+	// Default to "warn" so per-request Info/Debug logs become near-free
+	// no-ops on the hot path. Set LOG_LEVEL=info or =debug for local debugging.
+	levelStr := strings.TrimSpace(strings.ToLower(os.Getenv("LOG_LEVEL")))
 	var level zerolog.Level
 	switch levelStr {
 	case "debug":
 		level = zerolog.DebugLevel
+	case "info":
+		level = zerolog.InfoLevel
 	case "error":
 		level = zerolog.ErrorLevel
 	default:
-		level = zerolog.InfoLevel
+		level = zerolog.WarnLevel
 	}
 	zerolog.SetGlobalLevel(level)
 
-	log.Info().Str("log_level", levelStr).Msg("Structured logger initialized with zerolog")
+	log.Warn().Str("log_level", level.String()).Msg("Structured logger initialized")
 }
 
 func GetLogger(c *gin.Context) zerolog.Logger {

@@ -4,42 +4,42 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/domain/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 func TestTransactionService_CreateTransaction(t *testing.T) {
 	mockRepo := new(mocks.MockTransactionRepository)
 	service := NewTransactionService(mockRepo)
-	ctx := context.Background()
 
+	ctx := context.Background()
 	input := &domain.TransactionCreate{
-		UserID:      1,
-		RecipientID: 2,
-		Amount:      50000,
-		Type:        "transfer",
+		AccountNo: "ACC-1",
+		Amount:    50000,
+		Type:      "deposit",
 	}
 
 	t.Run("Success", func(t *testing.T) {
-		mockRepo.On("Create", ctx, input).Return(int64(100), nil).Once()
+		mockRepo.On("Create", ctx, input).Return("TRX-1", nil).Once()
 
 		id, err := service.CreateTransaction(ctx, input)
 
 		assert.NoError(t, err)
-		assert.Equal(t, int64(100), id)
+		assert.Equal(t, "TRX-1", id)
 		mockRepo.AssertExpectations(t)
 	})
 
 	t.Run("Error", func(t *testing.T) {
-		mockRepo.On("Create", ctx, input).Return(int64(0), errors.New("db error")).Once()
+		expectedErr := errors.New("database error")
+		mockRepo.On("Create", ctx, input).Return("", expectedErr).Once()
 
 		id, err := service.CreateTransaction(ctx, input)
 
-		assert.Error(t, err)
-		assert.Equal(t, int64(0), id)
+		assert.ErrorIs(t, err, expectedErr)
+		assert.Equal(t, "", id)
 		mockRepo.AssertExpectations(t)
 	})
 }
@@ -47,100 +47,104 @@ func TestTransactionService_CreateTransaction(t *testing.T) {
 func TestTransactionService_GetByTxID(t *testing.T) {
 	mockRepo := new(mocks.MockTransactionRepository)
 	service := NewTransactionService(mockRepo)
-	ctx := context.Background()
 
-	txID := "tx-123456"
+	ctx := context.Background()
+	txID := "tx-123"
 	expectedDetail := &domain.TransactionDetail{
-		ID:     1,
-		TxID:   txID,
-		Amount: 50000,
+		TrxID:     txID,
+		AccountNo: "ACC-1",
+		Amount:    10000,
+		Type:      "deposit",
+		Status:    "success",
 	}
 
 	t.Run("Success", func(t *testing.T) {
 		mockRepo.On("GetByTxID", ctx, txID).Return(expectedDetail, nil).Once()
 
-		result, err := service.GetByTxID(ctx, txID)
+		detail, err := service.GetByTxID(ctx, txID)
 
 		assert.NoError(t, err)
-		assert.Equal(t, expectedDetail, result)
+		assert.Equal(t, expectedDetail, detail)
 		mockRepo.AssertExpectations(t)
 	})
 
 	t.Run("Not Found", func(t *testing.T) {
-		mockRepo.On("GetByTxID", ctx, mock.Anything).Return((*domain.TransactionDetail)(nil), errors.New("not found")).Once()
+		expectedErr := errors.New("not found")
+		mockRepo.On("GetByTxID", ctx, txID).Return((*domain.TransactionDetail)(nil), expectedErr).Once()
 
-		result, err := service.GetByTxID(ctx, "invalid-tx")
+		detail, err := service.GetByTxID(ctx, txID)
 
-		assert.Error(t, err)
-		assert.Nil(t, result)
+		assert.ErrorIs(t, err, expectedErr)
+		assert.Nil(t, detail)
 		mockRepo.AssertExpectations(t)
 	})
 }
 
-func TestTransactionService_GetUserBalance(t *testing.T) {
+func TestTransactionService_GetAccountBalance(t *testing.T) {
 	mockRepo := new(mocks.MockTransactionRepository)
 	service := NewTransactionService(mockRepo)
-	ctx := context.Background()
 
-	userID := int64(1)
-	expectedBalance := &domain.UserBalance{
-		ID:       1,
-		Username: "user1",
-		Balance:  100000,
+	ctx := context.Background()
+	accountNo := "ACC-1"
+	expectedBalance := &domain.AccountBalance{
+		AccountNo: accountNo,
+		Balance:   150000,
 	}
 
 	t.Run("Success", func(t *testing.T) {
-		mockRepo.On("GetUserBalance", ctx, userID).Return(expectedBalance, nil).Once()
+		mockRepo.On("GetAccountBalance", ctx, accountNo).Return(expectedBalance, nil).Once()
 
-		result, err := service.GetUserBalance(ctx, userID)
-
-		assert.NoError(t, err)
-		assert.Equal(t, expectedBalance, result)
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("Not Found", func(t *testing.T) {
-		mockRepo.On("GetUserBalance", ctx, userID).Return((*domain.UserBalance)(nil), errors.New("not found")).Once()
-
-		result, err := service.GetUserBalance(ctx, userID)
-
-		assert.Error(t, err)
-		assert.Nil(t, result)
-		mockRepo.AssertExpectations(t)
-	})
-}
-
-func TestTransactionService_GetUserTransactions(t *testing.T) {
-	mockRepo := new(mocks.MockTransactionRepository)
-	service := NewTransactionService(mockRepo)
-	ctx := context.Background()
-
-	userID := int64(1)
-	limit := 10
-	offset := 0
-	expectedList := []*domain.TransactionDetail{
-		{ID: 1, Amount: 50000},
-		{ID: 2, Amount: 20000},
-	}
-
-	t.Run("Success", func(t *testing.T) {
-		mockRepo.On("GetUserTransactions", ctx, userID, limit, offset).Return(expectedList, nil).Once()
-
-		results, err := service.GetUserTransactions(ctx, userID, limit, offset)
+		balance, err := service.GetAccountBalance(ctx, accountNo)
 
 		assert.NoError(t, err)
-		assert.Len(t, results, 2)
-		assert.Equal(t, expectedList, results)
+		assert.Equal(t, expectedBalance, balance)
 		mockRepo.AssertExpectations(t)
 	})
 
 	t.Run("Error", func(t *testing.T) {
-		mockRepo.On("GetUserTransactions", ctx, userID, limit, offset).Return(([]*domain.TransactionDetail)(nil), errors.New("db error")).Once()
+		expectedErr := errors.New("user not found")
+		mockRepo.On("GetAccountBalance", ctx, accountNo).Return((*domain.AccountBalance)(nil), expectedErr).Once()
 
-		results, err := service.GetUserTransactions(ctx, userID, limit, offset)
+		balance, err := service.GetAccountBalance(ctx, accountNo)
 
-		assert.Error(t, err)
-		assert.Nil(t, results)
+		assert.ErrorIs(t, err, expectedErr)
+		assert.Nil(t, balance)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestTransactionService_GetAccountTransactions(t *testing.T) {
+	mockRepo := new(mocks.MockTransactionRepository)
+	service := NewTransactionService(mockRepo)
+
+	ctx := context.Background()
+	accountNo := "ACC-1"
+	limit, offset := 10, 0
+
+	expectedTx := []*domain.TransactionDetail{
+		{TrxID: "tx-1", AccountNo: accountNo, Amount: 1000, CreatedAt: time.Now()},
+		{TrxID: "tx-2", AccountNo: accountNo, Amount: 2000, CreatedAt: time.Now()},
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		mockRepo.On("GetAccountTransactions", ctx, accountNo, limit, offset).Return(expectedTx, nil).Once()
+
+		transactions, err := service.GetAccountTransactions(ctx, accountNo, limit, offset)
+
+		assert.NoError(t, err)
+		assert.Len(t, transactions, 2)
+		assert.Equal(t, expectedTx, transactions)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Error", func(t *testing.T) {
+		expectedErr := errors.New("db error")
+		mockRepo.On("GetAccountTransactions", ctx, accountNo, limit, offset).Return(([]*domain.TransactionDetail)(nil), expectedErr).Once()
+
+		transactions, err := service.GetAccountTransactions(ctx, accountNo, limit, offset)
+
+		assert.ErrorIs(t, err, expectedErr)
+		assert.Nil(t, transactions)
 		mockRepo.AssertExpectations(t)
 	})
 }
