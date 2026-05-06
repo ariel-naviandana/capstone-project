@@ -163,10 +163,10 @@ func TestTransactionRepository_Create(t *testing.T) {
 	})
 }
 
-// ==================== TEST GetUserBalance Cache-Aside ====================
+// ==================== TEST GetAccountBalance Cache-Aside ====================
 
-func TestTransactionRepository_GetUserBalance_CacheAside(t *testing.T) {
-	// When RedisClient is nil, GetUserBalance must still work (falls through to DB)
+func TestTransactionRepository_GetAccountBalance_CacheAside(t *testing.T) {
+	// When RedisClient is nil, it must still work (falls through to DB)
 	cache.RedisClient = nil
 
 	mockPool, err := pgxmock.NewPool()
@@ -176,17 +176,17 @@ func TestTransactionRepository_GetUserBalance_CacheAside(t *testing.T) {
 	repo := NewTransactionRepository(mockPool, mockPool)
 	ctx := context.Background()
 
-	mockPool.ExpectQuery(`SELECT id, username, balance FROM users`).
-		WithArgs(int64(1)).
-		WillReturnRows(pgxmock.NewRows([]string{"id", "username", "balance"}).
-			AddRow(int64(1), "user1", float64(100000)))
+	mockPool.ExpectQuery(`SELECT account_no, balance FROM accounts`).
+		WithArgs("ACC-1").
+		WillReturnRows(pgxmock.NewRows([]string{"account_no", "balance"}).
+			AddRow("ACC-1", float64(100000)))
 
-	result, err := repo.GetUserBalance(ctx, 1)
+	result, err := repo.GetAccountBalance(ctx, "ACC-1")
 	assert.NoError(t, err)
 	assert.Equal(t, float64(100000), result.Balance)
+	assert.Equal(t, "ACC-1", result.AccountNo)
 	assert.NoError(t, mockPool.ExpectationsWereMet())
 }
-
 
 // ==================== TEST GetByTxID METHOD ====================
 
@@ -257,6 +257,7 @@ func TestTransactionRepository_GetByTxID(t *testing.T) {
 	})
 }
 
+// ==================== TEST GetByTxID Cache-Aside ====================
 
 func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 	// When RedisClient is nil, GetByTxID must still work (falls through to DB)
@@ -270,26 +271,24 @@ func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Success - Transaction Found", func(t *testing.T) {
-		txID := "tx-123"
+		trxID := "TRX-123"
 		now := time.Now()
+		refNo := "REF-2"
 
 		rows := pgxmock.NewRows([]string{
-			"tx_id", "id", "user_id", "recipient_id",
-			"amount", "type", "status", "created_at", "updated_at",
-		}).AddRow(txID, int64(10), int64(1), int64(2), float64(50000), "transfer", "success", now, now)
+			"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at",
+		}).AddRow(trxID, "ACC-2", float64(50000), "transfer", "success", &refNo, now, now)
 
-		mockPool.ExpectQuery(`SELECT tx_id, id, user_id, COALESCE\(recipient_id, 0\) as recipient_id, amount, type, status, created_at, updated_at FROM transactions WHERE tx_id = \$1`).
-			WithArgs(txID).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+			WithArgs(trxID).
 			WillReturnRows(rows)
 
-		result, err := repo.GetByTxID(ctx, txID)
+		result, err := repo.GetByTxID(ctx, trxID)
 
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Equal(t, txID, result.TxID)
-		assert.Equal(t, int64(10), result.ID)
-		assert.Equal(t, int64(1), result.UserID)
-		assert.Equal(t, int64(2), result.RecipientID)
+		assert.Equal(t, trxID, result.TrxID)
+		assert.Equal(t, "ACC-2", result.AccountNo)
 		assert.Equal(t, float64(50000), result.Amount)
 		assert.Equal(t, "transfer", result.Type)
 		assert.Equal(t, "success", result.Status)
@@ -297,13 +296,13 @@ func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 	})
 
 	t.Run("Error - Transaction Not Found", func(t *testing.T) {
-		txID := "tx-notfound"
+		trxID := "TRX-notfound"
 
-		mockPool.ExpectQuery(`SELECT tx_id, id, user_id, COALESCE\(recipient_id, 0\) as recipient_id, amount, type, status, created_at, updated_at FROM transactions WHERE tx_id = \$1`).
-			WithArgs(txID).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+			WithArgs(trxID).
 			WillReturnError(pgx.ErrNoRows)
 
-		result, err := repo.GetByTxID(ctx, txID)
+		result, err := repo.GetByTxID(ctx, trxID)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
@@ -312,27 +311,29 @@ func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 	})
 
 	t.Run("Error - Database Failure", func(t *testing.T) {
-		txID := "tx-456"
+		trxID := "TRX-456"
 
-		mockPool.ExpectQuery(`SELECT tx_id, id, user_id, COALESCE\(recipient_id, 0\) as recipient_id, amount, type, status, created_at, updated_at FROM transactions WHERE tx_id = \$1`).
-			WithArgs(txID).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+			WithArgs(trxID).
 			WillReturnError(pgx.ErrTxClosed)
 
-		result, err := repo.GetByTxID(ctx, txID)
+		result, err := repo.GetByTxID(ctx, trxID)
 
 		assert.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "failed to get transaction")
 		assert.NoError(t, mockPool.ExpectationsWereMet())
 	})
-	timeNow := time.Now()
-	mockPool.ExpectQuery(`SELECT tx_id, id, user_id`).
-		WithArgs("tx-abc").
-		WillReturnRows(pgxmock.NewRows([]string{"tx_id", "id", "user_id", "recipient_id", "amount", "type", "status", "created_at", "updated_at"}).
-			AddRow("tx-abc", int64(1), int64(2), int64(0), float64(500), "deposit", "success", timeNow, timeNow))
 
-	result, err := repo.GetByTxID(ctx, "tx-abc")
+	timeNow := time.Now()
+	refNo3 := "REF-3"
+	mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+		WithArgs("TRX-abc").
+		WillReturnRows(pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"}).
+			AddRow("TRX-abc", "ACC-3", float64(500), "deposit", "success", &refNo3, timeNow, timeNow))
+
+	result, err := repo.GetByTxID(ctx, "TRX-abc")
 	assert.NoError(t, err)
-	assert.Equal(t, "tx-abc", result.TxID)
+	assert.Equal(t, "TRX-abc", result.TrxID)
 	assert.NoError(t, mockPool.ExpectationsWereMet())
 }
