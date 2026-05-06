@@ -7,12 +7,22 @@ import (
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/config"
+	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
 
 var RedisClient *redis.Client
+
+// BalanceLayer caches account balances. Hot path for /accounts/:no/balance —
+// L1 sized for ~10k hot accounts; soft TTL 1m so worker write-through stays
+// authoritative; hard TTL 1h tolerates Redis hiccups before falling back to DB.
+var BalanceLayer *Layer[domain.AccountBalance]
+
+// TxLayer caches per-transaction details (status). Smaller working set than
+// balances, but worker writes the final state through after each commit.
+var TxLayer *Layer[domain.TransactionDetail]
 
 func ConnectRedis() {
 	RedisClient = redis.NewClient(&redis.Options{
@@ -36,11 +46,44 @@ func ConnectRedis() {
 	log.Info().
 		Str("addr", config.AppConfig.RedisAddr).
 		Msg("Connected to Redis")
+
+	InitLayers()
+}
+
+// InitLayers builds the typed cache layers. Split out from ConnectRedis so
+// unit tests that swap RedisClient for miniredis can still set them up
+// without hitting the real Redis config.
+func InitLayers() {
+	if balanceLayer, err := NewLayer[domain.AccountBalance](
+		"account_balance",
+		10000,
+		1*time.Minute,
+		1*time.Hour,
+		30*time.Second,
+	); err != nil {
+		log.Fatal().Err(err).Msg("init BalanceLayer")
+	} else {
+		BalanceLayer = balanceLayer
+	}
+
+	if txLayer, err := NewLayer[domain.TransactionDetail](
+		"tx",
+		20000,
+		2*time.Minute,
+		15*time.Minute,
+		15*time.Second,
+	); err != nil {
+		log.Fatal().Err(err).Msg("init TxLayer")
+	} else {
+		TxLayer = txLayer
+	}
 }
 
 func CloseRedis() {
 	if RedisClient != nil {
-		RedisClient.Close()
+		if err := RedisClient.Close(); err != nil {
+			log.Warn().Err(err).Msg("Gagal menutup koneksi Redis")
+		}
 		log.Info().Msg("Redis disconnected")
 	}
 }

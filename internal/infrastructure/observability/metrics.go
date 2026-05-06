@@ -86,6 +86,16 @@ var (
 		},
 		[]string{"pool"},
 	)
+	// RequestsRejectedTotal counts requests rejected by protective middleware,
+	// labeled by the reason so a Grafana panel can show whether traffic is
+	// being blocked by the rate limiter, the DDoS shield, or a circuit breaker.
+	RequestsRejectedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "requests_rejected_total",
+			Help: "Total requests rejected before reaching business logic, by reason",
+		},
+		[]string{"reason", "path"},
+	)
 )
 
 func init() {
@@ -99,6 +109,7 @@ func init() {
 	prometheus.MustRegister(PgxpoolAcquiredConns)
 	prometheus.MustRegister(PgxpoolIdleConns)
 	prometheus.MustRegister(PgxpoolTotalConns)
+	prometheus.MustRegister(RequestsRejectedTotal)
 
 	BreakerState.WithLabelValues("KafkaProducer").Set(0)
 	BreakerState.WithLabelValues("KafkaConsumer").Set(0)
