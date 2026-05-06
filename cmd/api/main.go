@@ -165,7 +165,9 @@ func main() {
 			logger.Warn().Err(pgbErr).Msg("Health check: PgBouncer down")
 		} else {
 			components["pgbouncer"] = "up"
-			pgbConn.Close(pgbCtx)
+			if err := pgbConn.Close(pgbCtx); err != nil {
+                logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
+            }
 		}
 
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
