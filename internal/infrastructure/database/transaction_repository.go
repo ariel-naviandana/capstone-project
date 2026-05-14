@@ -34,27 +34,19 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 			trx_id,
 			account_no,
 			type,
-			trx_id,
-			account_no,
-			type,
 			amount,
 			status,
-			ref_no,
 			ref_no,
 			created_at,
 			updated_at
 		)
 		VALUES ($1, $2, $3, $4, 'pending', $5, NOW(), NOW())
 		RETURNING trx_id
-		RETURNING trx_id
 	`
 
 	returnedID, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (string, error) {
 		var returnedTrxID string
 		err := r.writeDb.QueryRow(ctx, query,
-			trxID,
-			input.AccountNo,
-			input.Type,
 			trxID,
 			input.AccountNo,
 			input.Type,
@@ -134,15 +126,14 @@ func (r *transactionRepository) GetAccountBalance(ctx context.Context, accountNo
 func (r *transactionRepository) GetAccountTransactions(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error) {
 	query := `
 		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
-		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		FROM transactions
 		WHERE account_no = $1
-\		ORDER BY created_at DESC
+		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
 
-		result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetAccountTransactions", func() ([]*domain.TransactionDetail, error) {
-			rows, err := r.readDb.Query(ctx, query, accountNo, limit, offset)
+	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetAccountTransactions", func() ([]*domain.TransactionDetail, error) {
+		rows, err := r.readDb.Query(ctx, query, accountNo, limit, offset)
 		if err != nil {
 			return nil, fmt.Errorf("failed to execute query get account transactions (account_no=%s): %w", accountNo, err)
 		}
@@ -157,10 +148,6 @@ func (r *transactionRepository) GetAccountTransactions(ctx context.Context, acco
 				&detail.Amount, &detail.Type, &detail.Status,
 				&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 			); err != nil {
-				return nil, fmt.Errorf("failed to scan transaction row (account_no=%s): %w", accountNo, err)
-			}
-			if refNo != nil {
-				detail.RefNo = *refNo
 				return nil, fmt.Errorf("failed to scan transaction row (account_no=%s): %w", accountNo, err)
 			}
 			if refNo != nil {
