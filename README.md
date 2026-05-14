@@ -650,8 +650,16 @@ kubectl delete pod -l app=postgres
 kubectl delete -f k8s/
 
 # Stop Minikube (hemat resource, data cluster tersimpan)
+#### Cleanup
+
+```powershell
+# Hapus semua resource K8s (data tidak persisten karena tanpa PVC)
+kubectl delete -f k8s/
+
+# Stop Minikube (hemat resource, data cluster tersimpan)
 minikube stop
 
+# Hapus cluster sepenuhnya (opsional)
 # Hapus cluster sepenuhnya (opsional)
 minikube delete
 

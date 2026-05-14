@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -41,8 +42,8 @@ func TestCreateTransaction(t *testing.T) {
 	}
 
 	service := NewTransactionService(mockRepo)
-	ctx := context.Background()
 
+	ctx := context.Background()
 	input := &domain.TransactionCreate{
 		AccountNo: "123-456-000001",
 		Amount:    100000,
@@ -74,6 +75,7 @@ func TestGetByTxID(t *testing.T) {
 	}
 
 	service := NewTransactionService(mockRepo)
+
 	ctx := context.Background()
 
 	detail, err := service.GetByTxID(ctx, "TRX-20260514-abc123")
@@ -95,6 +97,7 @@ func TestGetAccountBalance(t *testing.T) {
 	}
 
 	service := NewTransactionService(mockRepo)
+
 	ctx := context.Background()
 
 	balance, err := service.GetAccountBalance(ctx, "123-456-000001")
@@ -135,6 +138,7 @@ func TestGetAccountTransactions(t *testing.T) {
 	}
 
 	service := NewTransactionService(mockRepo)
+
 	ctx := context.Background()
 
 	transactions, err := service.GetAccountTransactions(ctx, "123-456-000001", 10, 0)

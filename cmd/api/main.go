@@ -143,6 +143,27 @@ func main() {
 		overallStatus := "healthy"
 		var errMsg string
 
+		// PgBouncer health check — one-shot connection, tests the pooler itself
+		pgbCtx, pgbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer pgbCancel()
+		pgbConn, pgbErr := pgx.Connect(pgbCtx, fmt.Sprintf(
+			"postgres://%s:%s@%s/capstone?sslmode=disable",
+			config.AppConfig.PostgresUser,
+			config.AppConfig.PostgresPassword,
+			config.AppConfig.PgBouncerAddr,
+		))
+		if pgbErr != nil {
+			components["pgbouncer"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("PgBouncer down: %v; ", pgbErr)
+			logger.Warn().Err(pgbErr).Msg("Health check: PgBouncer down")
+		} else {
+			components["pgbouncer"] = "up"
+			if err := pgbConn.Close(pgbCtx); err != nil {
+                logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
+            }
+		}
+
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer pgCancel()
 		if err := database.WritePool.Ping(pgCtx); err != nil {

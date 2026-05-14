@@ -11,9 +11,11 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 	"github.com/capstone-b4/capstone-go/internal/pkg/response"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/gin-gonic/gin"
@@ -42,11 +44,16 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	if input.Type == "transfer" && input.RecipientNo == "" {
 		logger.Warn().Msg("Missing recipient_no for transfer")
 		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "recipient_no wajib untuk transfer", ""))
+	if input.Type == "transfer" && input.RecipientNo == "" {
+		logger.Warn().Msg("Missing recipient_no for transfer")
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "recipient_no wajib untuk transfer", ""))
 		return
 	}
 
 	if input.Type == "transfer" && input.AccountNo == input.RecipientNo {
+	if input.Type == "transfer" && input.AccountNo == input.RecipientNo {
 		logger.Warn().Msg("Self-transfer not allowed")
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "tidak bisa transfer ke rekening sendiri", ""))
 		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "tidak bisa transfer ke rekening sendiri", ""))
 		return
 	}
@@ -102,6 +109,7 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 
 	c.JSON(http.StatusAccepted, response.SuccessJSON("Transaksi diterima dan akan diproses async (status pending)", gin.H{
 		"trx_id": txID,
+		"trx_id": txID,
 	}))
 }
 
@@ -129,8 +137,12 @@ func (h *TransactionHandler) GetByTxID(c *gin.Context) {
 }
 
 func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
+func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
+	accountNo := c.Param("accountNo")
+	if accountNo == "" {
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
 	accountNo := c.Param("accountNo")
 	if accountNo == "" {
 		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
@@ -144,6 +156,7 @@ func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 			c.JSON(http.StatusNotFound, response.ErrorJSON(response.ErrNotFound, "Account not found", ""))
 			return
 		}
+		logger.Error().Err(err).Str("account_no", accountNo).Msg("Gagal get balance account")
 		logger.Error().Err(err).Str("account_no", accountNo).Msg("Gagal get balance account")
 		c.JSON(http.StatusInternalServerError, response.ErrorJSON(response.ErrInternalError, "Failed to get balance", err.Error()))
 		return
@@ -160,6 +173,9 @@ func (h *TransactionHandler) GetAccountBalance(c *gin.Context) {
 func (h *TransactionHandler) GetAccountTransactions(c *gin.Context) {
 	logger := logging.GetLogger(c)
 
+	accountNo := c.Param("accountNo")
+	if accountNo == "" {
+		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
 	accountNo := c.Param("accountNo")
 	if accountNo == "" {
 		c.JSON(http.StatusBadRequest, response.ErrorJSON(response.ErrInvalidInput, "Invalid account NO", ""))
