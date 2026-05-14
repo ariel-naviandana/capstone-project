@@ -156,7 +156,6 @@ export const options = {
 // =========================================================================
 
 function generateHeaders(accountNo) {
-function generateHeaders(accountNo) {
     return {
         'Content-Type': 'application/json',
         'X-Account-No': accountNo.toString(),
@@ -174,7 +173,6 @@ function readHeavyUser(accountNo) {
     const params = { headers: generateHeaders(accountNo) };
 
     // Action: Check balance
-    const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
     const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
 
     balanceLatency.add(res.timings.duration);
@@ -195,7 +193,6 @@ function readHeavyUser(accountNo) {
     // Maybe check again (20% chance of impatient reload)
     if (Math.random() < 0.2) {
         const refreshRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
-        const refreshRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(refreshRes.timings.duration);
         const refreshSuccess = check(refreshRes, { 'balance status 200': (r) => r.status === 200 });
         handleResult(refreshSuccess, refreshRes);
@@ -208,7 +205,6 @@ function activeTransactor(accountNo) {
 
     // Action 1: Pre-check balance
     const balRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
-    const balRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
     const balSuccess = check(balRes, { 'is status 200': (r) => r.status === 200 });
     handleResult(balSuccess, balRes);
 
@@ -220,7 +216,6 @@ function activeTransactor(accountNo) {
     const amount = randomIntBetween(10, 5000); // 10 to 5000 units
 
     const payload = JSON.stringify({
-        account_no: accountNo,
         account_no: accountNo,
         amount: amount,
         type: type,
@@ -239,8 +234,6 @@ function activeTransactor(accountNo) {
     // Action 3: Check transaction status if creation was accepted
     if (success && txRes.json('data.trx_id')) {
         const txId = txRes.json('data.trx_id');
-    if (success && txRes.json('data.trx_id')) {
-        const txId = txRes.json('data.trx_id');
         const statusRes = http.get(http.url`${BASE_URL}/transactions/${txId}`, params, { tags: { name: 'get-transaction-status' } });
         const statusSuccess = check(statusRes, { 'is status 200': (r) => r.status === 200 });
         handleResult(statusSuccess, statusRes);
@@ -253,7 +246,6 @@ function apiClientBot(accountNo) {
 
     for (let i = 0; i < 10; i++) {
         // Poll balance rapidly
-        const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(res.timings.duration);
         const botSuccess = check(res, { 'is status 200': (r) => r.status === 200 });
