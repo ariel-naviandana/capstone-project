@@ -24,7 +24,7 @@ func TestPublishTransactionEvent_NilWriter(t *testing.T) {
 	kafkaWriter = nil
 	defer func() { kafkaWriter = originalWriter }()
 
-	err := PublishTransactionEvent("tx-123", 1, 2, 50000, "transfer", "trace-abc")
+	err := PublishTransactionEvent("tx-123", "ACC-1", "ACC-2", 50000, "transfer", "REF-1", "trace-abc")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "belum di-init")
 }

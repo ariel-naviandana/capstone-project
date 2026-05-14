@@ -6,7 +6,7 @@ data:
   SERVER_PORT: "8000"
   LOG_LEVEL: "info"
   # Direct Postgres details (fallback jika PGBOUNCER_ADDR dikosongkan)
-  POSTGRES_HOST: "host.minikube.internal"
+  POSTGRES_HOST: "postgres"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "capstone"
   REDIS_ADDR: "host.minikube.internal:6379"

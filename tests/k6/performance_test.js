@@ -155,10 +155,10 @@ export const options = {
 // HELPER LOGIC FOR REALISTIC DATA 
 // =========================================================================
 
-function generateHeaders(userId) {
+function generateHeaders(accountNo) {
     return {
         'Content-Type': 'application/json',
-        'X-User-ID': userId.toString(),
+        'X-Account-No': accountNo.toString(),
         'Accept': 'application/json',
         // Simulate real browsers dropping realistic User-Agent headers
         'User-Agent': `k6-Performance-Test/1.0 (Real User Sim; VU: ${__VU})`,
@@ -170,11 +170,11 @@ function generateHeaders(userId) {
 // =========================================================================
 
 // Behavior 1: Read-Heavy User (Checks balance, maybe refreshes) - ~60% prevalence
-function readHeavyUser(userId) {
-    const params = { headers: generateHeaders(userId) };
+function readHeavyUser(accountNo) {
+    const params = { headers: generateHeaders(accountNo) };
 
     // Action: Check balance
-    const res = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+    const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
 
     balanceLatency.add(res.timings.duration);
     const success = check(res, {
@@ -188,7 +188,7 @@ function readHeavyUser(userId) {
 
     // Maybe check again (20% chance of impatient reload)
     if (Math.random() < 0.2) {
-        const refreshRes = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+        const refreshRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(refreshRes.timings.duration);
         const refreshSuccess = check(refreshRes, { 'is status 200': (r) => r.status === 200 });
         handleResult(refreshSuccess, refreshRes);
@@ -197,11 +197,11 @@ function readHeavyUser(userId) {
 }
 
 // Behavior 2: Active Transactor (Checks balance -> Transacts -> Checks status) - ~30% prevalence
-function activeTransactor(userId) {
-    const params = { headers: generateHeaders(userId) };
+function activeTransactor(accountNo) {
+    const params = { headers: generateHeaders(accountNo) };
 
     // Action 1: Pre-check balance
-    const balRes = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+    const balRes = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
     const balSuccess = check(balRes, { 'is status 200': (r) => r.status === 200 });
     handleResult(balSuccess, balRes);
 
@@ -213,10 +213,10 @@ function activeTransactor(userId) {
     const amount = randomIntBetween(10, 5000); // 10 to 5000 units
 
     const payload = JSON.stringify({
-        user_id: userId,
+        account_no: accountNo,
         amount: amount,
         type: type,
-        description: `Realistic ${type} by user ${userId}`,
+        ref_no: `REF-${Date.now()}-${__VU}`,
     });
 
     const txRes = http.post(`${BASE_URL}/transactions`, payload, params, { tags: { name: 'post-transaction' } });
@@ -229,21 +229,21 @@ function activeTransactor(userId) {
     //sleep(0.5);
 
     // Action 3: Check transaction status if creation was accepted
-    if (success && txRes.json('id')) {
-        const txId = txRes.json('id');
+    if (success && txRes.json('data.trx_id')) {
+        const txId = txRes.json('data.trx_id');
         const statusRes = http.get(http.url`${BASE_URL}/transactions/${txId}`, params, { tags: { name: 'get-transaction-status' } });
-        const statusSuccess = check(statusRes, { 'is status 200 or 202': (r) => r.status === 200 || r.status === 202 });
+        const statusSuccess = check(statusRes, { 'is status 200': (r) => r.status === 200 });
         handleResult(statusSuccess, statusRes);
     }
 }
 
 // Behavior 3: API Client/Bot (High frequency, no think time) - ~10% prevalence
-function apiClientBot(userId) {
-    const params = { headers: generateHeaders(userId) };
+function apiClientBot(accountNo) {
+    const params = { headers: generateHeaders(accountNo) };
 
     for (let i = 0; i < 10; i++) {
         // Poll balance rapidly
-        const res = http.get(http.url`${BASE_URL}/users/${userId}/balance`, params, { tags: { name: 'get-balance' } });
+        const res = http.get(http.url`${BASE_URL}/accounts/${accountNo}/balance`, params, { tags: { name: 'get-balance' } });
         balanceLatency.add(res.timings.duration);
         const botSuccess = check(res, { 'is status 200': (r) => r.status === 200 });
         handleResult(botSuccess, res);
@@ -256,20 +256,22 @@ function apiClientBot(userId) {
 // =========================================================================
 
 export default function () {
-    // Select a random user ID between 1 and 100,000 (realistic large user base)
-    const randomUserId = randomIntBetween(1, 100000);
+    // Select a random account number in format: 123-456-000001
+    const randomAccountNum = randomIntBetween(1, 100000);
+    const paddedNum = String(randomAccountNum).padStart(6, '0');
+    const accountNo = `123-456-${paddedNum}`;
 
     // Probabilistic behavioral routing
     const randomBehavior = Math.random();
 
     if (randomBehavior < 0.6) {
         // 60% of traffic is just checking balance
-        readHeavyUser(randomUserId);
+        readHeavyUser(accountNo);
     } else if (randomBehavior < 0.9) {
         // 30% of traffic makes transactions
-        activeTransactor(randomUserId);
+        activeTransactor(accountNo);
     } else {
         // 10% of traffic behaves like aggressive API polling
-        apiClientBot(randomUserId);
+        apiClientBot(accountNo);
     }
 }

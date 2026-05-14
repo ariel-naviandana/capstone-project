@@ -3,48 +3,47 @@ package domain
 import "time"
 
 type Transaction struct {
-	ID          int64     `json:"id"`
-	UserID      int64     `json:"user_id"`
-	RecipientID int64     `json:"recipient_id,omitempty"`
-	Amount      float64   `json:"amount"`
-	Type        string    `json:"type"`
-	Status      string    `json:"status"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	TrxID     string    `json:"trx_id"`
+	AccountNo string    `json:"account_no"`
+	Type      string    `json:"type"`
+	Amount    float64   `json:"amount"`
+	Status    string    `json:"status"`
+	RefNo     string    `json:"ref_no,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type TransactionCreate struct {
-	UserID      int64   `json:"user_id" binding:"required"`
+	AccountNo   string  `json:"account_no" binding:"required"`
 	Amount      float64 `json:"amount" binding:"required,gt=0"`
 	Type        string  `json:"type" binding:"required,oneof=deposit withdraw transfer"`
-	RecipientID int64   `json:"recipient_id,omitempty"`
-	Description string  `json:"description,omitempty"`
+	RecipientNo string  `json:"recipient_no,omitempty"` // Used for transfers
+	RefNo       string  `json:"ref_no,omitempty"`
 }
 
 type KafkaTransactionEvent struct {
-	TxID        string  `json:"tx_id"`
-	UserID      int64   `json:"user_id"`
-	RecipientID int64   `json:"recipient_id"`
+	TrxID       string  `json:"trx_id"`
+	AccountNo   string  `json:"account_no"`
+	RecipientNo string  `json:"recipient_no,omitempty"`
 	Amount      float64 `json:"amount"`
 	Type        string  `json:"type"`
+	RefNo       string  `json:"ref_no,omitempty"`
 	Timestamp   string  `json:"timestamp"`
 }
 
 type TransactionDetail struct {
-	TxID        string    `json:"tx_id"`
-	ID          int64     `json:"id,omitempty"`
-	UserID      int64     `json:"user_id"`
-	RecipientID int64     `json:"recipient_id,omitempty"`
+	TrxID       string    `json:"trx_id"`
+	AccountNo   string    `json:"account_no"`
+	RecipientNo string    `json:"recipient_no,omitempty"`
 	Amount      float64   `json:"amount"`
 	Type        string    `json:"type"`
 	Status      string    `json:"status"`
+	RefNo       string    `json:"ref_no,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-type UserBalance struct {
-	ID       int64   `json:"id"`
-	Username string  `json:"username"`
-	Balance  float64 `json:"balance"`
+type AccountBalance struct {
+	AccountNo string  `json:"account_no"`
+	Balance   float64 `json:"balance"`
 }

@@ -1,25 +1,23 @@
 package config
 
 import (
-	"fmt"
-
 	"github.com/joho/godotenv"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 )
 
 type Config struct {
+	// APP_ENV gates protective middleware. "test" / "perf" disables the
+	// rate limiter and DDoS shield so k6 can drive real load against the
+	// app. Anything else (default "prod") keeps protections active.
+	AppEnv     string `mapstructure:"APP_ENV"`
 	ServerPort string `mapstructure:"SERVER_PORT"`
-	
-	PostgresHost        string `mapstructure:"POSTGRES_HOST"`
-    PostgresPort        string `mapstructure:"POSTGRES_PORT"`
-    PostgresReplicaHost string `mapstructure:"POSTGRES_REPLICA_HOST"`
-    PostgresReplicaPort string `mapstructure:"POSTGRES_REPLICA_PORT"`
-    PostgresUser        string `mapstructure:"POSTGRES_USER"`
-    PostgresPassword    string `mapstructure:"POSTGRES_PASSWORD"`
-    PostgresDBName      string `mapstructure:"POSTGRES_DB"`
-    PgBouncerAddr       string `mapstructure:"PGBOUNCER_ADDR"`
-    PgBouncerAdminAddr  string `mapstructure:"PGBOUNCER_ADMIN_ADDR"`
+
+	PostgresHost     string `mapstructure:"POSTGRES_HOST"`
+	PostgresPort     string `mapstructure:"POSTGRES_PORT"`
+	PostgresUser     string `mapstructure:"POSTGRES_USER"`
+	PostgresPassword string `mapstructure:"POSTGRES_PASSWORD"`
+	PostgresDBName   string `mapstructure:"POSTGRES_DB"`
 
 	KafkaBrokers []string `mapstructure:"KAFKA_BROKERS"`
 	KafkaTopic   string   `mapstructure:"KAFKA_TOPIC"`
@@ -33,8 +31,19 @@ type Config struct {
 
 	RateLimitRequests int `mapstructure:"RATE_LIMIT_REQUESTS"`
 	RateLimitWindow   int `mapstructure:"RATE_LIMIT_WINDOW"`
+	ShieldMaxInflight int `mapstructure:"SHIELD_MAX_INFLIGHT"`
+
+	PgBouncerAddr       string `mapstructure:"PGBOUNCER_ADDR"`
+	PgBouncerAdminAddr  string `mapstructure:"PGBOUNCER_ADMIN_ADDR"`
+	PostgresReplicaHost string `mapstructure:"POSTGRES_REPLICA_HOST"`
+	PostgresReplicaPort string `mapstructure:"POSTGRES_REPLICA_PORT"`
 
 	LogInfo bool `mapstructure:"LOG_INFO"`
+}
+
+// IsTestEnv reports whether protective middleware should be skipped (for k6 / perf runs).
+func (c Config) IsTestEnv() bool {
+	return c.AppEnv == "test" || c.AppEnv == "perf"
 }
 
 var AppConfig Config
@@ -49,21 +58,20 @@ func LoadConfig() {
 	viper.AutomaticEnv()
 
 	// Set Default Values
+	viper.SetDefault("APP_ENV", "prod")
 	viper.SetDefault("SERVER_PORT", "8000")
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 25000)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
-	viper.SetDefault("PGBOUNCER_ADDR", "pgbouncer:6432")
+	viper.SetDefault("SHIELD_MAX_INFLIGHT", 100)
 
 	// Bind Environment Variables for Viper Unmarshal
+	_ = viper.BindEnv("APP_ENV")
+	_ = viper.BindEnv("SHIELD_MAX_INFLIGHT")
 	_ = viper.BindEnv("POSTGRES_HOST")
 	_ = viper.BindEnv("POSTGRES_PORT")
-	_ = viper.BindEnv("POSTGRES_REPLICA_HOST")
-	_ = viper.BindEnv("POSTGRES_REPLICA_PORT")
 	_ = viper.BindEnv("POSTGRES_USER")
 	_ = viper.BindEnv("POSTGRES_PASSWORD")
 	_ = viper.BindEnv("POSTGRES_DB")
-	_ = viper.BindEnv("PGBOUNCER_ADDR")
-	_ = viper.BindEnv("PGBOUNCER_ADMIN_ADDR")
 	_ = viper.BindEnv("KAFKA_BROKERS")
 	_ = viper.BindEnv("KAFKA_TOPIC")
 	_ = viper.BindEnv("KAFKA_GROUP_ID")
@@ -73,19 +81,13 @@ func LoadConfig() {
 	_ = viper.BindEnv("REDIS_DB")
 	_ = viper.BindEnv("LOG_INFO")
 
+	_ = viper.BindEnv("PGBOUNCER_ADDR")
+	_ = viper.BindEnv("PGBOUNCER_ADMIN_ADDR")
+	_ = viper.BindEnv("POSTGRES_REPLICA_HOST")
+	_ = viper.BindEnv("POSTGRES_REPLICA_PORT")
+
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		log.Fatal().Err(err).Msg("Config unmarshal error")
-	}
-
-	// Build admin DSN from loaded credentials if not explicitly set via env.
-	// Avoids hardcoding a password default in source code.
-	if AppConfig.PgBouncerAdminAddr == "" {
-		AppConfig.PgBouncerAdminAddr = fmt.Sprintf(
-			"postgres://%s:%s@%s/pgbouncer",
-			AppConfig.PostgresUser,
-			AppConfig.PostgresPassword,
-			AppConfig.PgBouncerAddr,
-		)
 	}
 
 	if AppConfig.LogInfo {

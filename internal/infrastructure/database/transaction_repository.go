@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
-	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
@@ -26,185 +26,148 @@ func NewTransactionRepository(writeDb DBQueryInterface, readDb DBQueryInterface)
 	return &transactionRepository{writeDb: writeDb, readDb: readDb}
 }
 
-func (r *transactionRepository) Create(ctx context.Context, input *domain.TransactionCreate) (int64, error) {
-	var id int64
+func (r *transactionRepository) Create(ctx context.Context, input *domain.TransactionCreate) (string, error) {
+	trxID := "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
 
 	query := `
 		INSERT INTO transactions (
-			user_id,
-			recipient_id,
-			amount,
+			trx_id,
+			account_no,
 			type,
+			amount,
 			status,
-			description,
+			ref_no,
 			created_at,
 			updated_at
 		)
 		VALUES ($1, $2, $3, $4, 'pending', $5, NOW(), NOW())
-		RETURNING id
+		RETURNING trx_id
 	`
 
-	recipientID := input.RecipientID
-	if input.Type != "transfer" {
-		recipientID = 0
-	}
-
-	_, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (int64, error) {
+	returnedID, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (string, error) {
+		var returnedTrxID string
 		err := r.writeDb.QueryRow(ctx, query,
-			input.UserID,
-			recipientID,
-			input.Amount,
+			trxID,
+			input.AccountNo,
 			input.Type,
-			input.Description,
-		).Scan(&id)
+			input.Amount,
+			input.RefNo,
+		).Scan(&returnedTrxID)
 		if err != nil {
-			return 0, fmt.Errorf("failed to insert transaction (user_id=%d, type=%s): %w", input.UserID, input.Type, err)
+			return "", fmt.Errorf("failed to insert transaction (account_no=%s, type=%s): %w", input.AccountNo, input.Type, err)
 		}
-		return id, nil
+		return returnedTrxID, nil
 	})
 	if err != nil {
-		log.Warn().Err(err).Int64("user_id", input.UserID).Str("type", input.Type).Msg("Create transaction failed")
-		return 0, err
+		log.Warn().Err(err).Str("account_no", input.AccountNo).Str("type", input.Type).Msg("Create transaction failed")
+		return "", err
 	}
 
-	return id, nil
+	return returnedID, nil
 }
 
 func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
-	cacheKey := "tx:" + txID
-
-	// Cache-aside: try Redis first (nil-safe for unit tests)
-	if cache.RedisClient != nil {
-		if cached, hit := cache.GetCached[domain.TransactionDetail](ctx, cacheKey); hit {
-			return cached, nil
-		}
-	}
-
 	var detail domain.TransactionDetail
+	var refNo *string
 	query := `
-		SELECT tx_id, id, user_id, COALESCE(recipient_id, 0) as recipient_id, amount, type, status, created_at, updated_at
+		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		FROM transactions
-		WHERE tx_id = $1
+		WHERE trx_id = $1
 	`
 
 	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetByTxID", func() (*domain.TransactionDetail, error) {
 		err := r.readDb.QueryRow(ctx, query, txID).Scan(
-			&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
+			&detail.TrxID, &detail.AccountNo,
 			&detail.Amount, &detail.Type, &detail.Status,
-			&detail.CreatedAt, &detail.UpdatedAt,
+			&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 		)
+		if refNo != nil {
+			detail.RefNo = *refNo
+		}
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("transaction not found for tx_id=%s", txID)
+			return nil, fmt.Errorf("transaction not found for trx_id=%s", txID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to get transaction (tx_id=%s): %w", txID, err)
+			return nil, fmt.Errorf("failed to get transaction (trx_id=%s): %w", txID, err)
 		}
 		return &detail, nil
 	})
 	if err != nil {
-		log.Warn().Err(err).Str("tx_id", txID).Msg("GetByTxID failed")
+		log.Warn().Err(err).Str("trx_id", txID).Msg("GetByTxID failed")
 		return nil, err
 	}
-
-	// Populate cache for next read (non-fatal if Redis is down)
-	if cache.RedisClient != nil {
-		if setErr := cache.SetCache(ctx, cacheKey, result, 300*time.Second); setErr != nil {
-			log.Warn().Err(setErr).Str("tx_id", txID).Msg("GetByTxID: failed to populate cache")
-		}
-	}
-
 	return result, nil
 }
 
-func (r *transactionRepository) GetUserBalance(ctx context.Context, userID int64) (*domain.UserBalance, error) {
-	cacheKey := fmt.Sprintf("user_balance:%d", userID)
-
-	// Cache-aside: try Redis first (nil-safe for unit tests)
-	if cache.RedisClient != nil {
-		if cached, hit := cache.GetCached[domain.UserBalance](ctx, cacheKey); hit {
-			return cached, nil
-		}
-	}
-
-	var ub domain.UserBalance
+func (r *transactionRepository) GetAccountBalance(ctx context.Context, accountNo string) (*domain.AccountBalance, error) {
+	var ab domain.AccountBalance
 	query := `
-		SELECT id, username, balance
-		FROM users
-		WHERE id = $1
+		SELECT account_no, balance
+		FROM accounts
+		WHERE account_no = $1
 	`
 
-	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetUserBalance", func() (*domain.UserBalance, error) {
-		err := r.readDb.QueryRow(ctx, query, userID).Scan(&ub.ID, &ub.Username, &ub.Balance)
+	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetAccountBalance", func() (*domain.AccountBalance, error) {
+		err := r.readDb.QueryRow(ctx, query, accountNo).Scan(&ab.AccountNo, &ab.Balance)
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("user not found for user_id=%d", userID)
+			return nil, fmt.Errorf("account not found for account_no=%s", accountNo)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to get user balance (user_id=%d): %w", userID, err)
+			return nil, fmt.Errorf("failed to get account balance (account_no=%s): %w", accountNo, err)
 		}
-		return &ub, nil
+		return &ab, nil
 	})
 	if err != nil {
-		log.Warn().Err(err).Int64("user_id", userID).Msg("GetUserBalance failed")
+		log.Warn().Err(err).Str("account_no", accountNo).Msg("GetAccountBalance failed")
 		return nil, err
 	}
-
-	// Populate cache for next read (non-fatal if Redis is down)
-	if cache.RedisClient != nil {
-		if setErr := cache.SetCache(ctx, cacheKey, result, 60*time.Second); setErr != nil {
-			log.Warn().Err(setErr).Int64("user_id", userID).Msg("GetUserBalance: failed to populate cache")
-		}
-	}
-
 	return result, nil
 }
 
-func (r *transactionRepository) GetUserTransactions(ctx context.Context, userID int64, limit int, offset int) ([]*domain.TransactionDetail, error) {
-	// Manual Sharding Simulation:
-	// Jika sistem di-shard, kita dapat memilih db connection berdasarkan userID
-	// e.g., shardID := userID % 2
-	// dbPool := getShardDB(shardID)
-	// Namun di implementasi ini, kita mengambil langsung dari readDb (Replika).
-
+func (r *transactionRepository) GetAccountTransactions(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error) {
 	query := `
-		SELECT tx_id, id, user_id, COALESCE(recipient_id, 0) as recipient_id, amount, type, status, created_at, updated_at
+		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		FROM transactions
-		WHERE user_id = $1 OR recipient_id = $1
+		WHERE account_no = $1
 		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
 
-	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetUserTransactions", func() ([]*domain.TransactionDetail, error) {
-		rows, err := r.readDb.Query(ctx, query, userID, limit, offset)
+	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetAccountTransactions", func() ([]*domain.TransactionDetail, error) {
+		rows, err := r.readDb.Query(ctx, query, accountNo, limit, offset)
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute query get user transactions (user_id=%d): %w", userID, err)
+			return nil, fmt.Errorf("failed to execute query get account transactions (account_no=%s): %w", accountNo, err)
 		}
 		defer rows.Close()
 
 		var transactions []*domain.TransactionDetail
 		for rows.Next() {
 			var detail domain.TransactionDetail
+			var refNo *string
 			if err := rows.Scan(
-				&detail.TxID, &detail.ID, &detail.UserID, &detail.RecipientID,
+				&detail.TrxID, &detail.AccountNo,
 				&detail.Amount, &detail.Type, &detail.Status,
-				&detail.CreatedAt, &detail.UpdatedAt,
+				&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 			); err != nil {
-				return nil, fmt.Errorf("failed to scan transaction row (user_id=%d): %w", userID, err)
+				return nil, fmt.Errorf("failed to scan transaction row (account_no=%s): %w", accountNo, err)
+			}
+			if refNo != nil {
+				detail.RefNo = *refNo
 			}
 			transactions = append(transactions, &detail)
 		}
 
 		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("rows iteration error (user_id=%d): %w", userID, err)
+			return nil, fmt.Errorf("rows iteration error (account_no=%s): %w", accountNo, err)
 		}
 
 		return transactions, nil
 	})
 
 	if err != nil {
-		log.Warn().Err(err).Int64("user_id", userID).Msg("GetUserTransactions failed")
+		log.Warn().Err(err).Str("account_no", accountNo).Msg("GetAccountTransactions failed")
 		return nil, err
 	}
 
 	return result, nil
 }
-

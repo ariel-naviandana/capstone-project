@@ -2,145 +2,145 @@ package application
 
 import (
 	"context"
-	"errors"
 	"testing"
+	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
-	"github.com/capstone-b4/capstone-go/internal/domain/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
-func TestTransactionService_CreateTransaction(t *testing.T) {
-	mockRepo := new(mocks.MockTransactionRepository)
+type mockTransactionRepository struct {
+	createFunc                  func(ctx context.Context, input *domain.TransactionCreate) (string, error)
+	getByTxIDFunc               func(ctx context.Context, txID string) (*domain.TransactionDetail, error)
+	getAccountBalanceFunc       func(ctx context.Context, accountNo string) (*domain.AccountBalance, error)
+	getAccountTransactionsFunc  func(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error)
+}
+
+func (m *mockTransactionRepository) Create(ctx context.Context, input *domain.TransactionCreate) (string, error) {
+	return m.createFunc(ctx, input)
+}
+
+func (m *mockTransactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
+	return m.getByTxIDFunc(ctx, txID)
+}
+
+func (m *mockTransactionRepository) GetAccountBalance(ctx context.Context, accountNo string) (*domain.AccountBalance, error) {
+	return m.getAccountBalanceFunc(ctx, accountNo)
+}
+
+func (m *mockTransactionRepository) GetAccountTransactions(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error) {
+	return m.getAccountTransactionsFunc(ctx, accountNo, limit, offset)
+}
+
+func TestCreateTransaction(t *testing.T) {
+	mockRepo := &mockTransactionRepository{
+		createFunc: func(ctx context.Context, input *domain.TransactionCreate) (string, error) {
+			return "TRX-20260514-abc123", nil
+		},
+	}
+
 	service := NewTransactionService(mockRepo)
 	ctx := context.Background()
 
 	input := &domain.TransactionCreate{
-		UserID:      1,
-		RecipientID: 2,
-		Amount:      50000,
-		Type:        "transfer",
+		AccountNo: "123-456-000001",
+		Amount:    100000,
+		Type:      "deposit",
+		RefNo:     "REF001",
 	}
 
-	t.Run("Success", func(t *testing.T) {
-		mockRepo.On("Create", ctx, input).Return(int64(100), nil).Once()
+	trxID, err := service.CreateTransaction(ctx, input)
 
-		id, err := service.CreateTransaction(ctx, input)
-
-		assert.NoError(t, err)
-		assert.Equal(t, int64(100), id)
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("Error", func(t *testing.T) {
-		mockRepo.On("Create", ctx, input).Return(int64(0), errors.New("db error")).Once()
-
-		id, err := service.CreateTransaction(ctx, input)
-
-		assert.Error(t, err)
-		assert.Equal(t, int64(0), id)
-		mockRepo.AssertExpectations(t)
-	})
+	require.NoError(t, err)
+	assert.Equal(t, "TRX-20260514-abc123", trxID)
 }
 
-func TestTransactionService_GetByTxID(t *testing.T) {
-	mockRepo := new(mocks.MockTransactionRepository)
+func TestGetByTxID(t *testing.T) {
+	mockRepo := &mockTransactionRepository{
+		getByTxIDFunc: func(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
+			return &domain.TransactionDetail{
+				TrxID:       "TRX-20260514-abc123",
+				AccountNo:   "123-456-000001",
+				Amount:      100000,
+				Type:        "deposit",
+				Status:      "pending",
+				RefNo:       "REF001",
+				RecipientNo: "",
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			}, nil
+		},
+	}
+
 	service := NewTransactionService(mockRepo)
 	ctx := context.Background()
 
-	txID := "tx-123456"
-	expectedDetail := &domain.TransactionDetail{
-		ID:     1,
-		TxID:   txID,
-		Amount: 50000,
-	}
+	detail, err := service.GetByTxID(ctx, "TRX-20260514-abc123")
 
-	t.Run("Success", func(t *testing.T) {
-		mockRepo.On("GetByTxID", ctx, txID).Return(expectedDetail, nil).Once()
-
-		result, err := service.GetByTxID(ctx, txID)
-
-		assert.NoError(t, err)
-		assert.Equal(t, expectedDetail, result)
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("Not Found", func(t *testing.T) {
-		mockRepo.On("GetByTxID", ctx, mock.Anything).Return((*domain.TransactionDetail)(nil), errors.New("not found")).Once()
-
-		result, err := service.GetByTxID(ctx, "invalid-tx")
-
-		assert.Error(t, err)
-		assert.Nil(t, result)
-		mockRepo.AssertExpectations(t)
-	})
+	require.NoError(t, err)
+	assert.Equal(t, "TRX-20260514-abc123", detail.TrxID)
+	assert.Equal(t, "123-456-000001", detail.AccountNo)
+	assert.Equal(t, 100000.0, detail.Amount)
 }
 
-func TestTransactionService_GetUserBalance(t *testing.T) {
-	mockRepo := new(mocks.MockTransactionRepository)
+func TestGetAccountBalance(t *testing.T) {
+	mockRepo := &mockTransactionRepository{
+		getAccountBalanceFunc: func(ctx context.Context, accountNo string) (*domain.AccountBalance, error) {
+			return &domain.AccountBalance{
+				AccountNo: "123-456-000001",
+				Balance:   5000000,
+			}, nil
+		},
+	}
+
 	service := NewTransactionService(mockRepo)
 	ctx := context.Background()
 
-	userID := int64(1)
-	expectedBalance := &domain.UserBalance{
-		ID:       1,
-		Username: "user1",
-		Balance:  100000,
-	}
+	balance, err := service.GetAccountBalance(ctx, "123-456-000001")
 
-	t.Run("Success", func(t *testing.T) {
-		mockRepo.On("GetUserBalance", ctx, userID).Return(expectedBalance, nil).Once()
-
-		result, err := service.GetUserBalance(ctx, userID)
-
-		assert.NoError(t, err)
-		assert.Equal(t, expectedBalance, result)
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("Not Found", func(t *testing.T) {
-		mockRepo.On("GetUserBalance", ctx, userID).Return((*domain.UserBalance)(nil), errors.New("not found")).Once()
-
-		result, err := service.GetUserBalance(ctx, userID)
-
-		assert.Error(t, err)
-		assert.Nil(t, result)
-		mockRepo.AssertExpectations(t)
-	})
+	require.NoError(t, err)
+	assert.Equal(t, "123-456-000001", balance.AccountNo)
+	assert.Equal(t, 5000000.0, balance.Balance)
 }
 
-func TestTransactionService_GetUserTransactions(t *testing.T) {
-	mockRepo := new(mocks.MockTransactionRepository)
+func TestGetAccountTransactions(t *testing.T) {
+	mockRepo := &mockTransactionRepository{
+		getAccountTransactionsFunc: func(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error) {
+			return []*domain.TransactionDetail{
+				{
+					TrxID:       "TRX-20260514-abc123",
+					AccountNo:   "123-456-000001",
+					Amount:      100000,
+					Type:        "deposit",
+					Status:      "completed",
+					RefNo:       "REF001",
+					RecipientNo: "",
+					CreatedAt:   time.Now(),
+					UpdatedAt:   time.Now(),
+				},
+				{
+					TrxID:       "TRX-20260513-def456",
+					AccountNo:   "123-456-000001",
+					Amount:      50000,
+					Type:        "withdraw",
+					Status:      "completed",
+					RefNo:       "REF002",
+					RecipientNo: "",
+					CreatedAt:   time.Now().Add(-24 * time.Hour),
+					UpdatedAt:   time.Now().Add(-24 * time.Hour),
+				},
+			}, nil
+		},
+	}
+
 	service := NewTransactionService(mockRepo)
 	ctx := context.Background()
 
-	userID := int64(1)
-	limit := 10
-	offset := 0
-	expectedList := []*domain.TransactionDetail{
-		{ID: 1, Amount: 50000},
-		{ID: 2, Amount: 20000},
-	}
+	transactions, err := service.GetAccountTransactions(ctx, "123-456-000001", 10, 0)
 
-	t.Run("Success", func(t *testing.T) {
-		mockRepo.On("GetUserTransactions", ctx, userID, limit, offset).Return(expectedList, nil).Once()
-
-		results, err := service.GetUserTransactions(ctx, userID, limit, offset)
-
-		assert.NoError(t, err)
-		assert.Len(t, results, 2)
-		assert.Equal(t, expectedList, results)
-		mockRepo.AssertExpectations(t)
-	})
-
-	t.Run("Error", func(t *testing.T) {
-		mockRepo.On("GetUserTransactions", ctx, userID, limit, offset).Return(([]*domain.TransactionDetail)(nil), errors.New("db error")).Once()
-
-		results, err := service.GetUserTransactions(ctx, userID, limit, offset)
-
-		assert.Error(t, err)
-		assert.Nil(t, results)
-		mockRepo.AssertExpectations(t)
-	})
+	require.NoError(t, err)
+	assert.Len(t, transactions, 2)
+	assert.Equal(t, "TRX-20260514-abc123", transactions[0].TrxID)
+	assert.Equal(t, "123-456-000001", transactions[0].AccountNo)
 }

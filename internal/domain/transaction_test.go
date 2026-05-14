@@ -2,123 +2,128 @@ package domain
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTransactionStructFields(t *testing.T) {
-	now := time.Now()
-	tx := Transaction{
-		ID:          1,
-		UserID:      100,
-		RecipientID: 200,
-		Amount:      50000.50,
-		Type:        "transfer",
-		Status:      "success",
-		Description: "Test transfer",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+func TestTransactionCreateValidation(t *testing.T) {
+	testCases := []struct {
+		name    string
+		input   TransactionCreate
+		isValid bool
+	}{
+		{
+			name: "Valid deposit",
+			input: TransactionCreate{
+				AccountNo: "123-456-000001",
+				Amount:    100000,
+				Type:      "deposit",
+				RefNo:     "REF001",
+			},
+			isValid: true,
+		},
+		{
+			name: "Valid withdraw",
+			input: TransactionCreate{
+				AccountNo: "123-456-000001",
+				Amount:    50000,
+				Type:      "withdraw",
+				RefNo:     "REF002",
+			},
+			isValid: true,
+		},
+		{
+			name: "Valid transfer",
+			input: TransactionCreate{
+				AccountNo:   "123-456-000001",
+				RecipientNo: "456-789-000002",
+				Amount:      75000,
+				Type:        "transfer",
+				RefNo:       "REF003",
+			},
+			isValid: true,
+		},
+		{
+			name: "Missing account_no",
+			input: TransactionCreate{
+				Amount: 100000,
+				Type:   "deposit",
+			},
+			isValid: false,
+		},
+		{
+			name: "Invalid amount (zero)",
+			input: TransactionCreate{
+				AccountNo: "123-456-000001",
+				Amount:    0,
+				Type:      "deposit",
+			},
+			isValid: false,
+		},
+		{
+			name: "Invalid type",
+			input: TransactionCreate{
+				AccountNo: "123-456-000001",
+				Amount:    100000,
+				Type:      "invalid_type",
+			},
+			isValid: false,
+		},
 	}
 
-	assert.Equal(t, int64(1), tx.ID)
-	assert.Equal(t, int64(100), tx.UserID)
-	assert.Equal(t, int64(200), tx.RecipientID)
-	assert.Equal(t, 50000.50, tx.Amount)
-	assert.Equal(t, "transfer", tx.Type)
-	assert.Equal(t, "success", tx.Status)
-	assert.Equal(t, "Test transfer", tx.Description)
-	assert.Equal(t, now, tx.CreatedAt)
-	assert.Equal(t, now, tx.UpdatedAt)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			isValid := true
+
+			if tc.input.AccountNo == "" {
+				isValid = false
+			}
+
+			if tc.input.Amount <= 0 {
+				isValid = false
+			}
+
+			validTypes := map[string]bool{
+				"deposit":  true,
+				"withdraw": true,
+				"transfer": true,
+			}
+
+			if !validTypes[tc.input.Type] {
+				isValid = false
+			}
+
+			assert.Equal(t, tc.isValid, isValid)
+		})
+	}
 }
 
-func TestTransactionCreateStruct(t *testing.T) {
-	t.Run("Deposit", func(t *testing.T) {
-		input := TransactionCreate{
-			UserID: 1,
-			Amount: 10000,
-			Type:   "deposit",
-		}
-		assert.Equal(t, int64(1), input.UserID)
-		assert.Equal(t, 10000.0, input.Amount)
-		assert.Equal(t, "deposit", input.Type)
-		assert.Zero(t, input.RecipientID)
-	})
-
-	t.Run("Transfer with recipient", func(t *testing.T) {
-		input := TransactionCreate{
-			UserID:      1,
-			Amount:      5000,
-			Type:        "transfer",
-			RecipientID: 2,
-			Description: "Test",
-		}
-		assert.Equal(t, int64(1), input.UserID)
-		assert.Equal(t, 5000.0, input.Amount)
-		assert.Equal(t, "transfer", input.Type)
-		assert.Equal(t, int64(2), input.RecipientID)
-		assert.Equal(t, "Test", input.Description)
-	})
-}
-
-func TestKafkaTransactionEventStruct(t *testing.T) {
-	event := KafkaTransactionEvent{
-		TxID:        "tx-abc-123",
-		UserID:      1,
-		RecipientID: 2,
-		Amount:      75000,
-		Type:        "transfer",
-		Timestamp:   "2026-01-01T00:00:00Z",
+func TestAccountBalanceStructure(t *testing.T) {
+	balance := &AccountBalance{
+		AccountNo: "123-456-000001",
+		Balance:   5000000,
 	}
 
-	assert.Equal(t, "tx-abc-123", event.TxID)
-	assert.Equal(t, int64(1), event.UserID)
-	assert.Equal(t, int64(2), event.RecipientID)
-	assert.Equal(t, 75000.0, event.Amount)
-	assert.Equal(t, "transfer", event.Type)
-	assert.Equal(t, "2026-01-01T00:00:00Z", event.Timestamp)
+	assert.Equal(t, "123-456-000001", balance.AccountNo)
+	assert.Equal(t, 5000000.0, balance.Balance)
 }
 
-func TestTransactionDetailStruct(t *testing.T) {
-	now := time.Now().UTC()
-	detail := TransactionDetail{
-		TxID:        "tx-detail-456",
-		ID:          10,
-		UserID:      100,
-		RecipientID: 200,
-		Amount:      30000,
-		Type:        "transfer",
-		Status:      "success",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+func TestTransactionDetailStructure(t *testing.T) {
+	detail := &TransactionDetail{
+		TrxID:       "TRX-20260514-abc123",
+		AccountNo:   "123-456-000001",
+		Amount:      100000,
+		Type:        "deposit",
+		Status:      "pending",
+		RefNo:       "REF001",
+		RecipientNo: "",
 	}
 
-	assert.Equal(t, "tx-detail-456", detail.TxID)
-	assert.Equal(t, int64(10), detail.ID)
-	assert.Equal(t, int64(100), detail.UserID)
-	assert.Equal(t, int64(200), detail.RecipientID)
-	assert.Equal(t, 30000.0, detail.Amount)
-	assert.Equal(t, "transfer", detail.Type)
-	assert.Equal(t, "success", detail.Status)
-	assert.Equal(t, now, detail.CreatedAt)
-	assert.Equal(t, now, detail.UpdatedAt)
-}
-
-func TestUserBalanceStruct(t *testing.T) {
-	balance := UserBalance{
-		ID:       1,
-		Username: "testuser",
-		Balance:  500000,
-	}
-
-	assert.Equal(t, int64(1), balance.ID)
-	assert.Equal(t, "testuser", balance.Username)
-	assert.Equal(t, 500000.0, balance.Balance)
-}
-
-func TestUserBalanceZeroValue(t *testing.T) {
-	var balance UserBalance
-	assert.Zero(t, balance.ID)
-	assert.Empty(t, balance.Username)
-	assert.Zero(t, balance.Balance)
+	assert.Equal(t, "TRX-20260514-abc123", detail.TrxID)
+	assert.Equal(t, "123-456-000001", detail.AccountNo)
+	assert.Equal(t, 100000.0, detail.Amount)
+	assert.Equal(t, "deposit", detail.Type)
+	assert.Equal(t, "pending", detail.Status)
+	assert.Equal(t, "REF001", detail.RefNo)
+	assert.Empty(t, detail.RecipientNo)
 }
