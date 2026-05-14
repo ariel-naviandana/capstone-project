@@ -8,7 +8,6 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
 	"github.com/google/uuid"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 )
@@ -27,8 +26,6 @@ func NewTransactionRepository(writeDb DBQueryInterface, readDb DBQueryInterface)
 	return &transactionRepository{writeDb: writeDb, readDb: readDb}
 }
 
-func (r *transactionRepository) Create(ctx context.Context, input *domain.TransactionCreate) (string, error) {
-	trxID := "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
 func (r *transactionRepository) Create(ctx context.Context, input *domain.TransactionCreate) (string, error) {
 	trxID := "TRX-" + time.Now().Format("20060102150405") + "-" + uuid.NewString()[:6]
 
@@ -54,8 +51,6 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 
 	returnedID, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (string, error) {
 		var returnedTrxID string
-	returnedID, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresCreateTx", func() (string, error) {
-		var returnedTrxID string
 		err := r.writeDb.QueryRow(ctx, query,
 			trxID,
 			input.AccountNo,
@@ -66,64 +61,45 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 			input.Amount,
 			input.RefNo,
 		).Scan(&returnedTrxID)
-			input.RefNo,
-		).Scan(&returnedTrxID)
 		if err != nil {
 			return "", fmt.Errorf("failed to insert transaction (account_no=%s, type=%s): %w", input.AccountNo, input.Type, err)
-			return "", fmt.Errorf("failed to insert transaction (account_no=%s, type=%s): %w", input.AccountNo, input.Type, err)
 		}
-		return returnedTrxID, nil
 		return returnedTrxID, nil
 	})
 	if err != nil {
 		log.Warn().Err(err).Str("account_no", input.AccountNo).Str("type", input.Type).Msg("Create transaction failed")
 		return "", err
-		log.Warn().Err(err).Str("account_no", input.AccountNo).Str("type", input.Type).Msg("Create transaction failed")
-		return "", err
 	}
-
-	return returnedID, nil
 	return returnedID, nil
 }
 
 func (r *transactionRepository) GetByTxID(ctx context.Context, txID string) (*domain.TransactionDetail, error) {
 	var detail domain.TransactionDetail
 	var refNo *string
-	var refNo *string
 	query := `
 		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
-		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		FROM transactions
-		WHERE trx_id = $1
 		WHERE trx_id = $1
 	`
 
 	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetByTxID", func() (*domain.TransactionDetail, error) {
 		err := r.readDb.QueryRow(ctx, query, txID).Scan(
 			&detail.TrxID, &detail.AccountNo,
-			&detail.TrxID, &detail.AccountNo,
 			&detail.Amount, &detail.Type, &detail.Status,
-			&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 			&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 		)
 		if refNo != nil {
 			detail.RefNo = *refNo
 		}
-		if refNo != nil {
-			detail.RefNo = *refNo
-		}
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("transaction not found for trx_id=%s", txID)
 			return nil, fmt.Errorf("transaction not found for trx_id=%s", txID)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to get transaction (trx_id=%s): %w", txID, err)
 			return nil, fmt.Errorf("failed to get transaction (trx_id=%s): %w", txID, err)
 		}
 		return &detail, nil
 	})
 	if err != nil {
-		log.Warn().Err(err).Str("trx_id", txID).Msg("GetByTxID failed")
 		log.Warn().Err(err).Str("trx_id", txID).Msg("GetByTxID failed")
 		return nil, err
 	}
@@ -156,23 +132,18 @@ func (r *transactionRepository) GetAccountBalance(ctx context.Context, accountNo
 }
 
 func (r *transactionRepository) GetAccountTransactions(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error) {
-func (r *transactionRepository) GetAccountTransactions(ctx context.Context, accountNo string, limit int, offset int) ([]*domain.TransactionDetail, error) {
 	query := `
 		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at
 		FROM transactions
 		WHERE account_no = $1
-		WHERE account_no = $1
-		ORDER BY created_at DESC
+\		ORDER BY created_at DESC
 		LIMIT $2 OFFSET $3
 	`
 
-	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetAccountTransactions", func() ([]*domain.TransactionDetail, error) {
-		rows, err := r.readDb.Query(ctx, query, accountNo, limit, offset)
-	result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetAccountTransactions", func() ([]*domain.TransactionDetail, error) {
-		rows, err := r.readDb.Query(ctx, query, accountNo, limit, offset)
+		result, err := resilience.ExecuteWithBreaker(ctx, resilience.PostgresBreaker, "PostgresGetAccountTransactions", func() ([]*domain.TransactionDetail, error) {
+			rows, err := r.readDb.Query(ctx, query, accountNo, limit, offset)
 		if err != nil {
-			return nil, fmt.Errorf("failed to execute query get account transactions (account_no=%s): %w", accountNo, err)
 			return nil, fmt.Errorf("failed to execute query get account transactions (account_no=%s): %w", accountNo, err)
 		}
 		defer rows.Close()
@@ -181,12 +152,9 @@ func (r *transactionRepository) GetAccountTransactions(ctx context.Context, acco
 		for rows.Next() {
 			var detail domain.TransactionDetail
 			var refNo *string
-			var refNo *string
 			if err := rows.Scan(
 				&detail.TrxID, &detail.AccountNo,
-				&detail.TrxID, &detail.AccountNo,
 				&detail.Amount, &detail.Type, &detail.Status,
-				&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 				&refNo, &detail.CreatedAt, &detail.UpdatedAt,
 			); err != nil {
 				return nil, fmt.Errorf("failed to scan transaction row (account_no=%s): %w", accountNo, err)
@@ -203,14 +171,12 @@ func (r *transactionRepository) GetAccountTransactions(ctx context.Context, acco
 
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("rows iteration error (account_no=%s): %w", accountNo, err)
-			return nil, fmt.Errorf("rows iteration error (account_no=%s): %w", accountNo, err)
 		}
 
 		return transactions, nil
 	})
 
 	if err != nil {
-		log.Warn().Err(err).Str("account_no", accountNo).Msg("GetAccountTransactions failed")
 		log.Warn().Err(err).Str("account_no", accountNo).Msg("GetAccountTransactions failed")
 		return nil, err
 	}

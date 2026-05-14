@@ -10,10 +10,7 @@ type Config struct {
 	// APP_ENV gates protective middleware. "test" / "perf" disables the
 	// rate limiter and DDoS shield so k6 can drive real load against the
 	// app. Anything else (default "prod") keeps protections active.
-	AppEnv     string `mapstructure:"APP_ENV"`
-	// APP_ENV gates protective middleware. "test" / "perf" disables the
-	// rate limiter and DDoS shield so k6 can drive real load against the
-	// app. Anything else (default "prod") keeps protections active.
+
 	AppEnv     string `mapstructure:"APP_ENV"`
 	ServerPort string `mapstructure:"SERVER_PORT"`
 
@@ -43,11 +40,6 @@ type Config struct {
 	PostgresReplicaPort string `mapstructure:"POSTGRES_REPLICA_PORT"`
 
 	LogInfo bool `mapstructure:"LOG_INFO"`
-}
-
-// IsTestEnv reports whether protective middleware should be skipped (for k6 / perf runs).
-func (c Config) IsTestEnv() bool {
-	return c.AppEnv == "test" || c.AppEnv == "perf"
 }
 
 // IsTestEnv reports whether protective middleware should be skipped (for k6 / perf runs).

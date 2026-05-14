@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 	"time"
-	"time"
 
 	"github.com/capstone-b4/capstone-go/internal/domain"
 	"github.com/stretchr/testify/assert"

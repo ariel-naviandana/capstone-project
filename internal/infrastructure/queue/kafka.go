@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,8 +13,6 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/database"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/resilience"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
@@ -55,7 +52,6 @@ func createTopicIfNotExist(broker string, topic string) {
 		return
 	}
 	defer func() { _ = conn.Close() }()
-	defer func() { _ = conn.Close() }()
 
 	partitions, err := conn.ReadPartitions(topic)
 	if err == nil && len(partitions) > 0 {
@@ -77,7 +73,6 @@ func createTopicIfNotExist(broker string, topic string) {
 }
 
 func PublishTransactionEvent(txID string, accountNo string, recipientNo string, amount float64, txType string, refNo string, traceID string) error {
-func PublishTransactionEvent(txID string, accountNo string, recipientNo string, amount float64, txType string, refNo string, traceID string) error {
 	if kafkaWriter == nil {
 		return fmt.Errorf("kafka writer belum di-init")
 	}
@@ -90,17 +85,8 @@ func PublishTransactionEvent(txID string, accountNo string, recipientNo string, 
 		Type:        txType,
 		RefNo:       refNo,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-	event := domain.KafkaTransactionEvent{
-		TrxID:       txID,
-		AccountNo:   accountNo,
-		RecipientNo: recipientNo,
-		Amount:      amount,
-		Type:        txType,
-		RefNo:       refNo,
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
-	data, err := json.Marshal(event)
 	data, err := json.Marshal(event)
 	if err != nil {
 		log.Error().Err(err).Msg("Gagal marshal message untuk Kafka")
@@ -144,9 +130,6 @@ func CloseKafkaProducer() {
 		if err := kafkaWriter.Close(); err != nil {
 			log.Warn().Err(err).Msg("Gagal menutup Kafka producer")
 		}
-		if err := kafkaWriter.Close(); err != nil {
-			log.Warn().Err(err).Msg("Gagal menutup Kafka producer")
-		}
 		log.Info().Msg("Kafka producer ditutup")
 	}
 }
@@ -178,7 +161,6 @@ func StartKafkaConsumer() {
 	for {
 		var msg kafka.Message
 
-		_, breakerErr := resilience.ExecuteWithBreaker(
 		_, breakerErr := resilience.ExecuteWithBreaker(
 			context.Background(),
 			resilience.KafkaConsumerBreaker,
@@ -256,10 +238,6 @@ func StartKafkaConsumer() {
 				// In our new schema, event.TxID is now event.TrxID if we matched domain models.
 				// Wait, we defined KafkaTransactionEvent with TrxID, AccountNo, RecipientNo, Amount, Type, Timestamp.
 				// But we published with tx_id etc in json keys.
-				// The previous event payload was different. Now it has tx_id, account_no, recipient_no, amount, type, timestamp.
-				// In our new schema, event.TxID is now event.TrxID if we matched domain models.
-				// Wait, we defined KafkaTransactionEvent with TrxID, AccountNo, RecipientNo, Amount, Type, Timestamp.
-				// But we published with tx_id etc in json keys.
 				processTransactionEvent(&event, eventLogger)
 			}(batchMsg)
 		}
@@ -296,6 +274,18 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 	}
 	eventTime = eventTime.UTC()
 
+	pendingDetail := &domain.TransactionDetail{
+		TrxID:       event.TrxID,
+		AccountNo:   event.AccountNo,
+		RecipientNo: event.RecipientNo,
+		Amount:      event.Amount,
+		Type:        event.Type,
+		Status:      "pending",
+		RefNo:       event.RefNo,
+		CreatedAt:   eventTime,
+		UpdatedAt:   eventTime,
+	}
+
 	newStatus := "success"
 	details := "Processed successfully"
 	// duplicate stays true when ON CONFLICT short-circuits; we then skip
@@ -303,7 +293,6 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 	// delivery is not clobbered by this redelivery.
 	duplicate := false
 
-	_, breakerErr := resilience.ExecuteWithBreaker(
 	_, breakerErr := resilience.ExecuteWithBreaker(
 		ctx,
 		resilience.PostgresBreaker,
@@ -316,20 +305,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				}
 				defer func() {
 					if rbErr := txDB.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-					if rbErr := txDB.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
 						log.Warn().Err(rbErr).Msg("Error rolling back transaction")
 					}
 				}()
 
-				// 1. Deduplication using ON CONFLICT DO NOTHING.
-				// Partitioned tables require the partition key inside the PK,
-				// so the conflict target is (trx_id, created_at). Pass the
-				// producer timestamp so a redelivered Kafka message carries
-				// the same PK and the conflict actually fires.
-				var refNoArg interface{}
-				if event.RefNo != "" {
-					refNoArg = event.RefNo
-				}
 				// 1. Deduplication using ON CONFLICT DO NOTHING.
 				// Partitioned tables require the partition key inside the PK,
 				// so the conflict target is (trx_id, created_at). Pass the
@@ -345,12 +324,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 					 VALUES ($1, $2, $3, $4, 'pending', $5, $6, $6)
 					 ON CONFLICT (trx_id, created_at) DO NOTHING RETURNING trx_id`,
 					event.TrxID, event.AccountNo, event.Amount, event.Type, refNoArg, eventTime).Scan(&insertedTxID)
-					`INSERT INTO transactions (trx_id, account_no, amount, type, status, ref_no, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, 'pending', $5, $6, $6)
-					 ON CONFLICT (trx_id, created_at) DO NOTHING RETURNING trx_id`,
-					event.TrxID, event.AccountNo, event.Amount, event.Type, refNoArg, eventTime).Scan(&insertedTxID)
 
-				if err != nil && !errors.Is(err, pgx.ErrNoRows) { // Duplicate tx will return no rows
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) { // Duplicate tx will return no rows
 					return err
 				}
@@ -358,17 +332,18 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				if insertedTxID == "" {
 					duplicate = true
 					logger.Info().Str("tx_id", event.TrxID).Msg("Tx sudah diproses sebelumnya (duplicate)")
-					duplicate = true
-					logger.Info().Str("tx_id", event.TrxID).Msg("Tx sudah diproses sebelumnya (duplicate)")
 					return nil // Already processed
 				}
+
+				// Cache pending only after the row is ours, so a redelivered
+				// duplicate cannot overwrite the previously-committed final
+				// state with "pending".
+				cache.TxLayer.WriteThrough(ctx, event.TrxID, pendingDetail)
 
 				// 2. Lock Accounts & Calculate Balances safely
 				var userAccount domain.AccountBalance
 				var recipientAccount domain.AccountBalance
 
-				if event.Type == "transfer" && event.RecipientNo != "" {
-					rows, err := txDB.Query(ctx, "SELECT account_no, balance FROM accounts WHERE account_no IN ($1, $2) FOR UPDATE", event.AccountNo, event.RecipientNo)
 				if event.Type == "transfer" && event.RecipientNo != "" {
 					rows, err := txDB.Query(ctx, "SELECT account_no, balance FROM accounts WHERE account_no IN ($1, $2) FOR UPDATE", event.AccountNo, event.RecipientNo)
 					if err != nil {
@@ -379,17 +354,12 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 					for rows.Next() {
 						var account domain.AccountBalance
 						if err := rows.Scan(&account.AccountNo, &account.Balance); err != nil {
-						var account domain.AccountBalance
-						if err := rows.Scan(&account.AccountNo, &account.Balance); err != nil {
 							continue
 						}
 						switch account.AccountNo {
 						case event.AccountNo:
-						switch account.AccountNo {
-						case event.AccountNo:
 							userAccount = account
 							foundUser = true
-						case event.RecipientNo:
 						case event.RecipientNo:
 							recipientAccount = account
 							foundRecipient = true
@@ -400,16 +370,12 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 					if !foundUser || !foundRecipient {
 						newStatus = "failed"
 						details = "Salah satu account tidak ditemukan"
-						details = "Salah satu account tidak ditemukan"
 					}
 				} else {
 					err = txDB.QueryRow(ctx, "SELECT account_no, balance FROM accounts WHERE account_no = $1 FOR UPDATE", event.AccountNo).
 						Scan(&userAccount.AccountNo, &userAccount.Balance)
-					err = txDB.QueryRow(ctx, "SELECT account_no, balance FROM accounts WHERE account_no = $1 FOR UPDATE", event.AccountNo).
-						Scan(&userAccount.AccountNo, &userAccount.Balance)
 					if err != nil {
 						newStatus = "failed"
-						details = "Rekening pengirim tidak ditemukan"
 						details = "Rekening pengirim tidak ditemukan"
 					}
 				}
@@ -441,7 +407,6 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 							userBalance -= event.Amount
 							recipientBalance += event.Amount
 							details = fmt.Sprintf("Transfer %.2f ke rekening %s", event.Amount, event.RecipientNo)
-							details = fmt.Sprintf("Transfer %.2f ke rekening %s", event.Amount, event.RecipientNo)
 						}
 
 					default:
@@ -453,13 +418,10 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				// 4. Update balances if success
 				if newStatus == "success" {
 					_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", userBalance, event.AccountNo)
-					_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", userBalance, event.AccountNo)
 					if err != nil {
 						return err
 					}
 
-					if event.Type == "transfer" && event.RecipientNo != "" {
-						_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", recipientBalance, event.RecipientNo)
 					if event.Type == "transfer" && event.RecipientNo != "" {
 						_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", recipientBalance, event.RecipientNo)
 						if err != nil {
@@ -467,17 +429,15 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 						}
 					}
 
-					// Invalidate cache for updated accounts.
-					// Next read will cache-miss and fetch fresh balance from DB.
-					// Repository layer handles cache-aside pattern.
-					if delErr := cache.RedisClient.Del(ctx, "account_balance:"+event.AccountNo).Err(); delErr != nil {
-						logger.Warn().Err(delErr).Str("account_no", event.AccountNo).Msg("Failed to invalidate balance cache")
-					}
+					// Update caching immediately (Write-Through rather than Invalidate).
+					// BalanceLayer populates both L1 + Redis so reads after a commit
+					// hit memory directly without going to Postgres.
+					userAccount.Balance = userBalance
+					cache.BalanceLayer.WriteThrough(ctx, event.AccountNo, &userAccount)
 
 					if event.Type == "transfer" && event.RecipientNo != "" {
-						if delErr := cache.RedisClient.Del(ctx, "account_balance:"+event.RecipientNo).Err(); delErr != nil {
-							logger.Warn().Err(delErr).Str("account_no", event.RecipientNo).Msg("Failed to invalidate recipient balance cache")
-						}
+						recipientAccount.Balance = recipientBalance
+						cache.BalanceLayer.WriteThrough(ctx, event.RecipientNo, &recipientAccount)
 					}
 				} else {
 					// Fallback for failed transactions
@@ -486,18 +446,8 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 				// 5. Update transaction status
 				_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE trx_id = $2", newStatus, event.TrxID)
-				_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE trx_id = $2", newStatus, event.TrxID)
 				if err != nil {
 					return err
-				}
-
-				// 6. Generate Notification
-				notifID := "NTF-" + uuid.NewString()[:8]
-				_, err = txDB.Exec(ctx, "INSERT INTO notifications (notif_id, account_no, channel, title, trx_ref, created_at, updated_at) VALUES ($1, $2, 'in-app', $3, $4, NOW(), NOW())",
-					notifID, event.AccountNo, details, event.TrxID)
-				if err != nil {
-					log.Warn().Err(err).Msg("Gagal membuat notifikasi")
-					// Not a hard failure for the transaction.
 				}
 
 				// 6. Generate Notification
@@ -518,23 +468,32 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		logger.Warn().
 			Err(breakerErr).
 			Str("tx_id", event.TrxID).
-			Str("tx_id", event.TrxID).
 			Msg("Postgres process ditolak breaker")
 		return
 	}
 
-	// Duplicates are skipped: no additional action needed.
-	// DB is source of truth; caching handled by Repository layer on next read.
+	// Skip the final cache write for duplicates: the first delivery already
+	// wrote the canonical state and this event's payload may differ.
 	if duplicate {
 		return
 	}
+
+	finalDetail := &domain.TransactionDetail{
+		TrxID:       event.TrxID,
+		AccountNo:   event.AccountNo,
+		RecipientNo: event.RecipientNo,
+		Amount:      event.Amount,
+		Type:        event.Type,
+		Status:      newStatus,
+		RefNo:       event.RefNo,
+		CreatedAt:   eventTime,
+		UpdatedAt:   time.Now().UTC(),
+	}
+	cache.TxLayer.WriteThrough(ctx, event.TrxID, finalDetail)
 }
 
 func CloseKafkaConsumer() {
 	if kafkaReader != nil {
-		if err := kafkaReader.Close(); err != nil {
-			log.Warn().Err(err).Msg("Gagal menutup Kafka consumer")
-		}
 		if err := kafkaReader.Close(); err != nil {
 			log.Warn().Err(err).Msg("Gagal menutup Kafka consumer")
 		}
