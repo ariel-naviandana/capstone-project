@@ -73,25 +73,13 @@ func TestTransactionCreateValidation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			isValid := true
-
-			if tc.input.AccountNo == "" {
-				isValid = false
-			}
-
-			if tc.input.Amount <= 0 {
-				isValid = false
-			}
-
 			validTypes := map[string]bool{
 				"deposit":  true,
 				"withdraw": true,
 				"transfer": true,
 			}
 
-			if !validTypes[tc.input.Type] {
-				isValid = false
-			}
+			isValid := tc.input.AccountNo != "" && tc.input.Amount > 0 && validTypes[tc.input.Type]
 
 			assert.Equal(t, tc.isValid, isValid)
 		})
