@@ -16,12 +16,12 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
 	_ "github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
-	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -142,6 +142,27 @@ func main() {
 		components := make(map[string]string)
 		overallStatus := "healthy"
 		var errMsg string
+
+		// PgBouncer health check — one-shot connection, tests the pooler itself
+		pgbCtx, pgbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer pgbCancel()
+		pgbConn, pgbErr := pgx.Connect(pgbCtx, fmt.Sprintf(
+			"postgres://%s:%s@%s/capstone?sslmode=disable",
+			config.AppConfig.PostgresUser,
+			config.AppConfig.PostgresPassword,
+			config.AppConfig.PgBouncerAddr,
+		))
+		if pgbErr != nil {
+			components["pgbouncer"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("PgBouncer down: %v; ", pgbErr)
+			logger.Warn().Err(pgbErr).Msg("Health check: PgBouncer down")
+		} else {
+			components["pgbouncer"] = "up"
+			if err := pgbConn.Close(pgbCtx); err != nil {
+                logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
+            }
+		}
 
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer pgCancel()

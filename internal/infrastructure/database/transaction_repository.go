@@ -62,7 +62,6 @@ func (r *transactionRepository) Create(ctx context.Context, input *domain.Transa
 		log.Warn().Err(err).Str("account_no", input.AccountNo).Str("type", input.Type).Msg("Create transaction failed")
 		return "", err
 	}
-
 	return returnedID, nil
 }
 

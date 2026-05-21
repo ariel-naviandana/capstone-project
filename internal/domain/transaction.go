@@ -17,8 +17,8 @@ type TransactionCreate struct {
 	AccountNo   string  `json:"account_no" binding:"required"`
 	Amount      float64 `json:"amount" binding:"required,gt=0"`
 	Type        string  `json:"type" binding:"required,oneof=deposit withdraw transfer"`
-	RecipientNo string  `json:"recipient_no,omitempty"` // Used for transfers
 	RefNo       string  `json:"ref_no,omitempty"`
+	RecipientNo string  `json:"recipient_no,omitempty"` // Used for transfers
 }
 
 type KafkaTransactionEvent struct {

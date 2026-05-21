@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bankx-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bankx-api
+  template:
+    metadata:
+      labels:
+        app: bankx-api
+    spec:
+      # preStop (5s) + WriteTimeout Go server (15s) = 20s < 30s → cukup sebelum SIGKILL
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: api
+        image: capstone-project-api:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: bankx-config
+        - secretRef:
+            name: bankx-secret
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "150Mi"
+          limits:
+            cpu: "700m"
+            memory: "300Mi"
+
+        # Sleep 5s memberi waktu iptables/ipvs propagasi endpoint removal
+        # sebelum SIGTERM dikirim ke container → tidak ada dropped connection saat scale-down.
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "5"]
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 5
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3

@@ -158,11 +158,7 @@ export const options = {
 function generateHeaders(accountNo) {
     return {
         'Content-Type': 'application/json',
-        'X-Account-No': accountNo,
-        // The server's rate limiter keys on X-User-ID first, then falls back
-        // to client IP. All k6 VUs share one host IP, so without this header
-        // we'd hammer a single rate-limit bucket. Per-account limits = realistic.
-        'X-User-ID': accountNo,
+        'X-Account-No': accountNo.toString(),
         'Accept': 'application/json',
         'User-Agent': `k6-Performance-Test/1.0 (Real User Sim; VU: ${__VU})`,
     };
@@ -173,8 +169,7 @@ function generateHeaders(accountNo) {
 // =========================================================================
 
 // Behavior 1: Read-Heavy User (Checks balance, maybe refreshes) - ~60% prevalence
-function readHeavyUser(userId) {
-    const accountNo = `123-456-${userId.toString().padStart(6, '0')}`;
+function readHeavyUser(accountNo) {
     const params = { headers: generateHeaders(accountNo) };
 
     // Action: Check balance
@@ -205,8 +200,7 @@ function readHeavyUser(userId) {
 }
 
 // Behavior 2: Active Transactor (Checks balance -> Transacts -> Checks status) - ~30% prevalence
-function activeTransactor(userId) {
-    const accountNo = `123-456-${userId.toString().padStart(6, '0')}`;
+function activeTransactor(accountNo) {
     const params = { headers: generateHeaders(accountNo) };
 
     // Action 1: Pre-check balance
@@ -225,7 +219,7 @@ function activeTransactor(userId) {
         account_no: accountNo,
         amount: amount,
         type: type,
-        description: `Realistic ${type} by user ${accountNo}`,
+        ref_no: `REF-${Date.now()}-${__VU}`,
     });
 
     const txRes = http.post(`${BASE_URL}/transactions`, payload, params, { tags: { name: 'post-transaction' } });
@@ -241,14 +235,13 @@ function activeTransactor(userId) {
     if (success && txRes.json('data.trx_id')) {
         const txId = txRes.json('data.trx_id');
         const statusRes = http.get(http.url`${BASE_URL}/transactions/${txId}`, params, { tags: { name: 'get-transaction-status' } });
-        const statusSuccess = check(statusRes, { 'is status 200 or 202': (r) => r.status === 200 || r.status === 202 });
+        const statusSuccess = check(statusRes, { 'is status 200': (r) => r.status === 200 });
         handleResult(statusSuccess, statusRes);
     }
 }
 
 // Behavior 3: API Client/Bot (High frequency, no think time) - ~10% prevalence
-function apiClientBot(userId) {
-    const accountNo = `123-456-${userId.toString().padStart(6, '0')}`;
+function apiClientBot(accountNo) {
     const params = { headers: generateHeaders(accountNo) };
 
     for (let i = 0; i < 10; i++) {
@@ -266,20 +259,22 @@ function apiClientBot(userId) {
 // =========================================================================
 
 export default function () {
-    // Select a random user ID between 1 and 100,000 (realistic large user base)
-    const randomUserId = randomIntBetween(1, 100000);
+    // Select a random account number in format: 123-456-000001
+    const randomAccountNum = randomIntBetween(1, 100000);
+    const paddedNum = String(randomAccountNum).padStart(6, '0');
+    const accountNo = `123-456-${paddedNum}`;
 
     // Probabilistic behavioral routing
     const randomBehavior = Math.random();
 
     if (randomBehavior < 0.6) {
         // 60% of traffic is just checking balance
-        readHeavyUser(randomUserId);
+        readHeavyUser(accountNo);
     } else if (randomBehavior < 0.9) {
         // 30% of traffic makes transactions
-        activeTransactor(randomUserId);
+        activeTransactor(accountNo);
     } else {
         // 10% of traffic behaves like aggressive API polling
-        apiClientBot(randomUserId);
+        apiClientBot(accountNo);
     }
 }
