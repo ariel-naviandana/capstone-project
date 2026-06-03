@@ -82,6 +82,17 @@ const profiles = {
             ],
         },
     },
+    load_slo: {
+        load_slo_scenario: {
+            executor: 'ramping-vus',
+            startVUs: 0,
+            stages: [
+                { duration: '30s', target: parseInt(__ENV.VU_TARGET || '850') }, // Ramp up to target
+                { duration: '2m',  target: parseInt(__ENV.VU_TARGET || '850') }, // Hold steady — SLO measurement window
+                { duration: '30s', target: 0 },                                   // Ramp down
+            ],
+        },
+    },
 };
 
 // Default profile: runs smoke, load, spike, and stress sequentially
@@ -136,7 +147,7 @@ if (profileType === 'default') {
 } else if (profiles[profileType]) {
     activeScenarios = profiles[profileType];
 } else {
-    console.error(`Invalid TEST_PROFILE: ${profileType}. Valid options are: default, smoke, load, stress, spike, soak`);
+    console.error(`Invalid TEST_PROFILE: ${profileType}. Valid options are: default, smoke, load, stress, spike, soak, load_slo`);
 }
 
 export const options = {
