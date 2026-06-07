@@ -299,13 +299,28 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 		"PostgresProcessTx",
 		func() (struct{}, error) {
 			return struct{}{}, resilience.RetryWithBackoff(ctx, func() error {
-				txDB, err := database.WritePool.Begin(ctx)
+				shardPool, shardID, err := database.TransactionShardPoolForAccount(event.AccountNo)
+				if err != nil {
+					return err
+				}
+
+				shardTx, err := shardPool.Begin(ctx)
 				if err != nil {
 					return err
 				}
 				defer func() {
-					if rbErr := txDB.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-						log.Warn().Err(rbErr).Msg("Error rolling back transaction")
+					if rbErr := shardTx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+						log.Warn().Err(rbErr).Int("shard_id", shardID).Msg("Error rolling back shard transaction")
+					}
+				}()
+
+				mainTx, err := database.WritePool.Begin(ctx)
+				if err != nil {
+					return err
+				}
+				defer func() {
+					if rbErr := mainTx.Rollback(ctx); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
+						log.Warn().Err(rbErr).Msg("Error rolling back main transaction")
 					}
 				}()
 
@@ -319,11 +334,11 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 					refNoArg = event.RefNo
 				}
 				var insertedTxID string
-				err = txDB.QueryRow(ctx,
-					`INSERT INTO transactions (trx_id, account_no, amount, type, status, ref_no, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, 'pending', $5, $6, $6)
+				err = shardTx.QueryRow(ctx,
+					`INSERT INTO transactions (trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at)
+					 VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $7)
 					 ON CONFLICT (trx_id, created_at) DO NOTHING RETURNING trx_id`,
-					event.TrxID, event.AccountNo, event.Amount, event.Type, refNoArg, eventTime).Scan(&insertedTxID)
+					event.TrxID, event.AccountNo, event.RecipientNo, event.Amount, event.Type, refNoArg, eventTime).Scan(&insertedTxID)
 
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) { // Duplicate tx will return no rows
 					return err
@@ -345,7 +360,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				var recipientAccount domain.AccountBalance
 
 				if event.Type == "transfer" && event.RecipientNo != "" {
-					rows, err := txDB.Query(ctx, "SELECT account_no, balance FROM accounts WHERE account_no IN ($1, $2) FOR UPDATE", event.AccountNo, event.RecipientNo)
+					rows, err := mainTx.Query(ctx, "SELECT account_no, balance FROM accounts WHERE account_no IN ($1, $2) FOR UPDATE", event.AccountNo, event.RecipientNo)
 					if err != nil {
 						return err
 					}
@@ -372,7 +387,7 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 						details = "Salah satu account tidak ditemukan"
 					}
 				} else {
-					err = txDB.QueryRow(ctx, "SELECT account_no, balance FROM accounts WHERE account_no = $1 FOR UPDATE", event.AccountNo).
+					err = mainTx.QueryRow(ctx, "SELECT account_no, balance FROM accounts WHERE account_no = $1 FOR UPDATE", event.AccountNo).
 						Scan(&userAccount.AccountNo, &userAccount.Balance)
 					if err != nil {
 						newStatus = "failed"
@@ -417,13 +432,13 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 
 				// 4. Update balances if success
 				if newStatus == "success" {
-					_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", userBalance, event.AccountNo)
+					_, err = mainTx.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", userBalance, event.AccountNo)
 					if err != nil {
 						return err
 					}
 
 					if event.Type == "transfer" && event.RecipientNo != "" {
-						_, err = txDB.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", recipientBalance, event.RecipientNo)
+						_, err = mainTx.Exec(ctx, "UPDATE accounts SET balance = $1, updated_at = NOW() WHERE account_no = $2", recipientBalance, event.RecipientNo)
 						if err != nil {
 							return err
 						}
@@ -445,21 +460,29 @@ func processTransactionEvent(event *domain.KafkaTransactionEvent, logger zerolog
 				}
 
 				// 5. Update transaction status
-				_, err = txDB.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE trx_id = $2", newStatus, event.TrxID)
+				_, err = shardTx.Exec(ctx, "UPDATE transactions SET status = $1, updated_at = NOW() WHERE trx_id = $2", newStatus, event.TrxID)
 				if err != nil {
 					return err
 				}
 
 				// 6. Generate Notification
 				notifID := "NTF-" + uuid.NewString()[:8]
-				_, err = txDB.Exec(ctx, "INSERT INTO notifications (notif_id, account_no, channel, title, trx_ref, created_at, updated_at) VALUES ($1, $2, 'in-app', $3, $4, NOW(), NOW())",
+				_, err = mainTx.Exec(ctx, "INSERT INTO notifications (notif_id, account_no, channel, title, trx_ref, created_at, updated_at) VALUES ($1, $2, 'in-app', $3, $4, NOW(), NOW())",
 					notifID, event.AccountNo, details, event.TrxID)
 				if err != nil {
 					log.Warn().Err(err).Msg("Gagal membuat notifikasi")
 					// Not a hard failure for the transaction.
 				}
 
-				return txDB.Commit(ctx)
+				if err := mainTx.Commit(ctx); err != nil {
+					return err
+				}
+				if err := shardTx.Commit(ctx); err != nil {
+					return err
+				}
+
+				logger.Info().Int("shard_id", shardID).Str("tx_id", event.TrxID).Str("account_no", event.AccountNo).Msg("Transaction processed in shard")
+				return nil
 			}, 3, 500*time.Millisecond)
 		},
 	)

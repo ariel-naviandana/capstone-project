@@ -39,6 +39,14 @@ type Config struct {
 	PostgresReplicaHost string `mapstructure:"POSTGRES_REPLICA_HOST"`
 	PostgresReplicaPort string `mapstructure:"POSTGRES_REPLICA_PORT"`
 
+	ShardCount         int    `mapstructure:"SHARD_COUNT"`
+	PostgresShard0Host string `mapstructure:"POSTGRES_SHARD_0_HOST"`
+	PostgresShard0Port string `mapstructure:"POSTGRES_SHARD_0_PORT"`
+	PostgresShard0DB   string `mapstructure:"POSTGRES_SHARD_0_DB"`
+	PostgresShard1Host string `mapstructure:"POSTGRES_SHARD_1_HOST"`
+	PostgresShard1Port string `mapstructure:"POSTGRES_SHARD_1_PORT"`
+	PostgresShard1DB   string `mapstructure:"POSTGRES_SHARD_1_DB"`
+
 	LogInfo bool `mapstructure:"LOG_INFO"`
 }
 
@@ -65,6 +73,13 @@ func LoadConfig() {
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 25000)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
 	viper.SetDefault("SHIELD_MAX_INFLIGHT", 100)
+	viper.SetDefault("SHARD_COUNT", 2)
+	viper.SetDefault("POSTGRES_SHARD_0_HOST", "postgres-shard-0")
+	viper.SetDefault("POSTGRES_SHARD_0_PORT", "5432")
+	viper.SetDefault("POSTGRES_SHARD_0_DB", "capstone_shard_0")
+	viper.SetDefault("POSTGRES_SHARD_1_HOST", "postgres-shard-1")
+	viper.SetDefault("POSTGRES_SHARD_1_PORT", "5432")
+	viper.SetDefault("POSTGRES_SHARD_1_DB", "capstone_shard_1")
 
 	// Bind Environment Variables for Viper Unmarshal
 	_ = viper.BindEnv("APP_ENV")
@@ -89,6 +104,13 @@ func LoadConfig() {
 	_ = viper.BindEnv("PGBOUNCER_ADMIN_ADDR")
 	_ = viper.BindEnv("POSTGRES_REPLICA_HOST")
 	_ = viper.BindEnv("POSTGRES_REPLICA_PORT")
+	_ = viper.BindEnv("SHARD_COUNT")
+	_ = viper.BindEnv("POSTGRES_SHARD_0_HOST")
+	_ = viper.BindEnv("POSTGRES_SHARD_0_PORT")
+	_ = viper.BindEnv("POSTGRES_SHARD_0_DB")
+	_ = viper.BindEnv("POSTGRES_SHARD_1_HOST")
+	_ = viper.BindEnv("POSTGRES_SHARD_1_PORT")
+	_ = viper.BindEnv("POSTGRES_SHARD_1_DB")
 
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		log.Fatal().Err(err).Msg("Config unmarshal error")

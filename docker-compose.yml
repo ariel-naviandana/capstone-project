@@ -42,6 +42,10 @@ services:
         condition: service_healthy
       pgbouncer:
         condition: service_healthy
+      postgres-shard-0:
+        condition: service_healthy
+      postgres-shard-1:
+        condition: service_healthy
     env_file:
       - .env
     networks:
@@ -70,6 +74,10 @@ services:
       mongo:
         condition: service_healthy
       pgbouncer:
+        condition: service_healthy
+      postgres-shard-0:
+        condition: service_healthy
+      postgres-shard-1:
         condition: service_healthy
     env_file:
       - .env
@@ -179,6 +187,68 @@ services:
         limits:
           cpus: "1.5"
           memory: 768M
+
+  postgres-shard-0:
+    image: postgres:18
+    container_name: tx-postgres-shard-0
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_SHARD_0_DB:-capstone_shard_0}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capstone123}
+    ports:
+      - "5440:5432"
+    volumes:
+      - postgres_shard_0_data:/var/lib/postgresql
+      - ./docker/postgres-shard/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_SHARD_0_DB:-capstone_shard_0}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  postgres-shard-1:
+    image: postgres:18
+    container_name: tx-postgres-shard-1
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_SHARD_1_DB:-capstone_shard_1}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capstone123}
+    ports:
+      - "5441:5432"
+    volumes:
+      - postgres_shard_1_data:/var/lib/postgresql
+      - ./docker/postgres-shard/init.sql:/docker-entrypoint-initdb.d/01_init.sql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_SHARD_1_DB:-capstone_shard_1}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
 
   pgbouncer:
     image: pgbouncer/pgbouncer:latest
@@ -407,6 +477,8 @@ networks:
 volumes:
   postgres_primary_data:
   postgres_replica_data:
+  postgres_shard_0_data:
+  postgres_shard_1_data:
   redis_data:
   mongo_data:
   zookeeper_data:

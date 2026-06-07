@@ -61,11 +61,12 @@ func TestTransactionRepository_GetAccountTransactions(t *testing.T) {
 	t.Run("Success Returns Data", func(t *testing.T) {
 		timeNow := time.Now()
 		var nilRef *string
-		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"}).
-			AddRow("tx123", "ACC-1", float64(50000), "deposit", "success", nilRef, timeNow, timeNow).
-			AddRow("tx456", "ACC-1", float64(20000), "transfer", "pending", nilRef, timeNow, timeNow)
+		var nilRecipient *string
+		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "recipient_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"}).
+			AddRow("tx123", "ACC-1", nilRecipient, float64(50000), "deposit", "success", nilRef, timeNow, timeNow).
+			AddRow("tx456", "ACC-1", nilRecipient, float64(20000), "transfer", "pending", nilRef, timeNow, timeNow)
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions`).
 			WithArgs("ACC-1", 10, 0).
 			WillReturnRows(rows)
 
@@ -79,9 +80,9 @@ func TestTransactionRepository_GetAccountTransactions(t *testing.T) {
 	})
 
 	t.Run("Success Returns Empty Database", func(t *testing.T) {
-		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"})
+		rows := pgxmock.NewRows([]string{"trx_id", "account_no", "recipient_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"})
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions`).
 			WithArgs("ACC-3", 10, 0).
 			WillReturnRows(rows)
 
@@ -113,7 +114,7 @@ func TestTransactionRepository_Create(t *testing.T) {
 		}
 
 		mockPool.ExpectQuery(`INSERT INTO transactions`).
-			WithArgs(pgxmock.AnyArg(), input.AccountNo, input.Type, input.Amount, input.RefNo).
+			WithArgs(pgxmock.AnyArg(), input.AccountNo, input.RecipientNo, input.Type, input.Amount, input.RefNo).
 			WillReturnRows(pgxmock.NewRows([]string{"trx_id"}).AddRow("TRX-1"))
 
 		id, err := repo.Create(ctx, input)
@@ -133,7 +134,7 @@ func TestTransactionRepository_Create(t *testing.T) {
 		}
 
 		mockPool.ExpectQuery(`INSERT INTO transactions`).
-			WithArgs(pgxmock.AnyArg(), input.AccountNo, input.Type, input.Amount, input.RefNo).
+			WithArgs(pgxmock.AnyArg(), input.AccountNo, input.RecipientNo, input.Type, input.Amount, input.RefNo).
 			WillReturnRows(pgxmock.NewRows([]string{"trx_id"}).AddRow("TRX-2"))
 
 		id, err := repo.Create(ctx, input)
@@ -151,7 +152,7 @@ func TestTransactionRepository_Create(t *testing.T) {
 		}
 
 		mockPool.ExpectQuery(`INSERT INTO transactions`).
-			WithArgs(pgxmock.AnyArg(), input.AccountNo, input.Type, input.Amount, input.RefNo).
+			WithArgs(pgxmock.AnyArg(), input.AccountNo, input.RecipientNo, input.Type, input.Amount, input.RefNo).
 			WillReturnError(pgx.ErrTxClosed)
 
 		id, err := repo.Create(ctx, input)
@@ -204,12 +205,13 @@ func TestTransactionRepository_GetByTxID(t *testing.T) {
 		trxID := "TRX-123"
 		now := time.Now()
 		refNo := "REF-1"
+		var recipientNo *string
 
 		rows := pgxmock.NewRows([]string{
-			"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at",
-		}).AddRow(trxID, "ACC-1", float64(50000), "transfer", "success", &refNo, now, now)
+			"trx_id", "account_no", "recipient_no", "amount", "type", "status", "ref_no", "created_at", "updated_at",
+		}).AddRow(trxID, "ACC-1", recipientNo, float64(50000), "transfer", "success", &refNo, now, now)
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
 			WithArgs(trxID).
 			WillReturnRows(rows)
 
@@ -229,7 +231,10 @@ func TestTransactionRepository_GetByTxID(t *testing.T) {
 	t.Run("Error - Transaction Not Found", func(t *testing.T) {
 		trxID := "TRX-notfound"
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+			WithArgs(trxID).
+			WillReturnError(pgx.ErrNoRows)
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
 			WithArgs(trxID).
 			WillReturnError(pgx.ErrNoRows)
 
@@ -244,7 +249,7 @@ func TestTransactionRepository_GetByTxID(t *testing.T) {
 	t.Run("Error - Database Failure", func(t *testing.T) {
 		trxID := "TRX-456"
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
 			WithArgs(trxID).
 			WillReturnError(pgx.ErrTxClosed)
 
@@ -274,12 +279,13 @@ func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 		trxID := "TRX-123"
 		now := time.Now()
 		refNo := "REF-2"
+		var recipientNo *string
 
 		rows := pgxmock.NewRows([]string{
-			"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at",
-		}).AddRow(trxID, "ACC-2", float64(50000), "transfer", "success", &refNo, now, now)
+			"trx_id", "account_no", "recipient_no", "amount", "type", "status", "ref_no", "created_at", "updated_at",
+		}).AddRow(trxID, "ACC-2", recipientNo, float64(50000), "transfer", "success", &refNo, now, now)
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
 			WithArgs(trxID).
 			WillReturnRows(rows)
 
@@ -298,7 +304,10 @@ func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 	t.Run("Error - Transaction Not Found", func(t *testing.T) {
 		trxID := "TRX-notfound"
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+			WithArgs(trxID).
+			WillReturnError(pgx.ErrNoRows)
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
 			WithArgs(trxID).
 			WillReturnError(pgx.ErrNoRows)
 
@@ -313,7 +322,7 @@ func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 	t.Run("Error - Database Failure", func(t *testing.T) {
 		trxID := "TRX-456"
 
-		mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+		mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
 			WithArgs(trxID).
 			WillReturnError(pgx.ErrTxClosed)
 
@@ -327,10 +336,11 @@ func TestTransactionRepository_GetByTxID_CacheAside(t *testing.T) {
 
 	timeNow := time.Now()
 	refNo3 := "REF-3"
-	mockPool.ExpectQuery(`SELECT trx_id, account_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
+	var recipientNo3 *string
+	mockPool.ExpectQuery(`SELECT trx_id, account_no, recipient_no, amount, type, status, ref_no, created_at, updated_at FROM transactions WHERE trx_id = \$1`).
 		WithArgs("TRX-abc").
-		WillReturnRows(pgxmock.NewRows([]string{"trx_id", "account_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"}).
-			AddRow("TRX-abc", "ACC-3", float64(500), "deposit", "success", &refNo3, timeNow, timeNow))
+		WillReturnRows(pgxmock.NewRows([]string{"trx_id", "account_no", "recipient_no", "amount", "type", "status", "ref_no", "created_at", "updated_at"}).
+			AddRow("TRX-abc", "ACC-3", recipientNo3, float64(500), "deposit", "success", &refNo3, timeNow, timeNow))
 
 	result, err := repo.GetByTxID(ctx, "TRX-abc")
 	assert.NoError(t, err)

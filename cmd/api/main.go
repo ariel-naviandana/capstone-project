@@ -160,8 +160,8 @@ func main() {
 		} else {
 			components["pgbouncer"] = "up"
 			if err := pgbConn.Close(pgbCtx); err != nil {
-                logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
-            }
+				logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
+			}
 		}
 
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -173,6 +173,20 @@ func main() {
 			logger.Warn().Err(err).Msg("Health check: Postgres Primary down")
 		} else {
 			components["postgres_primary"] = "up"
+		}
+
+		for shardID, shardPool := range database.ShardWritePools {
+			shardName := fmt.Sprintf("postgres_shard_%d", shardID)
+			shardCtx, shardCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if err := shardPool.Ping(shardCtx); err != nil {
+				components[shardName] = "down"
+				overallStatus = "unhealthy"
+				errMsg += fmt.Sprintf("Postgres Shard %d down: %v; ", shardID, err)
+				logger.Warn().Err(err).Int("shard_id", shardID).Msg("Health check: Postgres shard down")
+			} else {
+				components[shardName] = "up"
+			}
+			shardCancel()
 		}
 
 		pgRepCtx, pgRepCancel := context.WithTimeout(context.Background(), 2*time.Second)

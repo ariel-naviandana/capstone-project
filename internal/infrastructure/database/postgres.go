@@ -12,6 +12,7 @@ import (
 
 var WritePool *pgxpool.Pool
 var ReadPool *pgxpool.Pool
+var ShardWritePools []*pgxpool.Pool
 
 func ConnectPostgres() {
 	var primaryAddr, replicaAddr, writeDB, readDB string
@@ -110,6 +111,53 @@ func ConnectPostgres() {
 			Str("database", writeDB).
 			Msg("Connected to PostgreSQL directly (Kubernetes mode)")
 	}
+
+	connectTransactionShards()
+}
+
+func connectTransactionShards() {
+	shards := []struct {
+		id   int
+		host string
+		port string
+		db   string
+	}{
+		{0, config.AppConfig.PostgresShard0Host, config.AppConfig.PostgresShard0Port, config.AppConfig.PostgresShard0DB},
+		{1, config.AppConfig.PostgresShard1Host, config.AppConfig.PostgresShard1Port, config.AppConfig.PostgresShard1DB},
+	}
+
+	ShardWritePools = make([]*pgxpool.Pool, 0, len(shards))
+	const poolParams = "sslmode=disable&pool_max_conns=100&pool_min_conns=2&pool_max_conn_idle_time=5m"
+
+	for _, shard := range shards {
+		addr := shard.host + ":" + shard.port
+		dsn := fmt.Sprintf(
+			"postgres://%s:%s@%s/%s?%s",
+			config.AppConfig.PostgresUser,
+			config.AppConfig.PostgresPassword,
+			addr,
+			shard.db,
+			poolParams,
+		)
+
+		poolConfig, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			log.Fatal().Err(err).Int("shard_id", shard.id).Msg("Unable to parse PostgreSQL shard DSN")
+		}
+		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
+		pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
+		if err != nil {
+			log.Fatal().Err(err).Int("shard_id", shard.id).Msg("Unable to connect to PostgreSQL shard")
+		}
+
+		ShardWritePools = append(ShardWritePools, pool)
+		log.Info().
+			Int("shard_id", shard.id).
+			Str("addr", addr).
+			Str("database", shard.db).
+			Msg("Connected to PostgreSQL transaction shard")
+	}
 }
 
 func ClosePostgres() {
@@ -118,6 +166,11 @@ func ClosePostgres() {
 	}
 	if ReadPool != nil {
 		ReadPool.Close()
+	}
+	for _, pool := range ShardWritePools {
+		if pool != nil {
+			pool.Close()
+		}
 	}
 	log.Info().Msg("PostgreSQL connections closed")
 }
