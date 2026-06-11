@@ -54,7 +54,7 @@ func ensureIndexes() {
 
 	indexes := []mongo.IndexModel{
 		{
-			Keys:    bson.D{{Key: "tx_id", Value: 1}},
+			Keys:    bson.D{{Key: "trx_id", Value: 1}},
 			Options: options.Index().SetUnique(true),
 		},
 		{
@@ -64,7 +64,7 @@ func ensureIndexes() {
 			Keys: bson.D{{Key: "status", Value: 1}},
 		},
 		{
-			Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "timestamp", Value: -1}},
+			Keys: bson.D{{Key: "account_no", Value: 1}, {Key: "timestamp", Value: -1}},
 		},
 	}
 
@@ -77,12 +77,14 @@ func ensureIndexes() {
 	}
 
 	log.Info().
-		Msg("Mongo indexes berhasil dibuat/diperiksa (tx_id, timestamp, status, user_id)")
+		Msg("Mongo indexes berhasil dibuat/diperiksa (trx_id, timestamp, status, account_no)")
 }
 
 func CloseMongo() {
 	if MongoClient != nil {
-		MongoClient.Disconnect(context.Background())
+		if err := MongoClient.Disconnect(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("Error disconnecting from MongoDB")
+		}
 		log.Info().Msg("MongoDB disconnected")
 	}
 }
@@ -92,29 +94,31 @@ func LogToMongo(event domain.KafkaTransactionEvent, status string, details strin
 	defer cancel()
 
 	doc := bson.M{
-		"tx_id":     event.TxID,
-		"user_id":   event.UserID,
-		"type":      event.Type,
-		"amount":    event.Amount,
-		"status":    status,
-		"details":   details,
-		"timestamp": time.Now().UTC(),
+		"trx_id":     event.TrxID,
+		"account_no": event.AccountNo,
+		"type":       event.Type,
+		"amount":     event.Amount,
+		"status":     status,
+		"details":    details,
+		"timestamp":  time.Now().UTC(),
 	}
 
-	err := resilience.RetryWithBackoff(ctx, func() error {
-		_, err := TransactionLogCollection.InsertOne(ctx, doc)
-		return err
-	}, 3, 1*time.Second)
+	_, err := resilience.ExecuteWithBreaker(ctx, resilience.MongoBreaker, "MongoLogTx", func() (struct{}, error) {
+		return struct{}{}, resilience.RetryWithBackoff(ctx, func() error {
+			_, err := TransactionLogCollection.InsertOne(ctx, doc)
+			return err
+		}, 3, 1*time.Second)
+	})
 
 	if err != nil {
 		log.Warn().
 			Err(err).
-			Str("tx_id", event.TxID).
+			Str("trx_id", event.TrxID).
 			Str("status", status).
 			Msg("Gagal log ke Mongo (breaker)")
 	} else {
 		log.Info().
-			Str("tx_id", event.TxID).
+			Str("trx_id", event.TrxID).
 			Str("status", status).
 			Msg("Logged to Mongo")
 	}

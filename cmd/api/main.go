@@ -17,12 +17,12 @@ import (
 	_ "github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/queue"
 	"github.com/capstone-b4/capstone-go/internal/pkg/response"
-	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -83,9 +83,20 @@ func main() {
 	r.NoRoute(middleware.NoRouteHandler())
 	r.NoMethod(middleware.NoMethodHandler())
 
-	// Melindungi container dari goroutine leak saat DDOS (Limit 100 request concurrent / fail-fast)
-	middleware.InitDDosShield(100)
-	r.Use(middleware.DDosShield())
+	// APP_ENV=test/perf disables protective middleware so k6 can drive real
+	// load against the app. Anything else keeps shield + rate limiter active.
+	isTestEnv := config.AppConfig.IsTestEnv()
+	if isTestEnv {
+		log.Warn().Str("app_env", config.AppConfig.AppEnv).Msg("Test/perf mode: DDoS shield + rate limiter DISABLED")
+	} else {
+		shieldCap := config.AppConfig.ShieldMaxInflight
+		if shieldCap <= 0 {
+			shieldCap = 100
+		}
+		middleware.InitDDosShield(shieldCap)
+		r.Use(middleware.DDosShield())
+		log.Info().Int("shield_max_inflight", shieldCap).Msg("DDoS shield enabled")
+	}
 
 	r.Use(func(c *gin.Context) {
 		start := time.Now()
@@ -103,31 +114,13 @@ func main() {
 
 	r.Use(requestid.New())
 
-	// Inisialisasi Asynchronous UUID Pre-Generator Pool untuk ultra-low latency
-	uuidPool := make(chan string, 10000)
-	for i := 0; i < 3; i++ { // 3 Worker mempercepat pengisian
-		go func() {
-			for {
-				uuidPool <- uuid.New().String()
-			}
-		}()
-	}
-
+	// Trace ID is supplied by gin-contrib/requestid (UUID v4). Falls back to
+	// a fresh uuid only if the upstream middleware didn't set one.
 	r.Use(func(c *gin.Context) {
 		reqID := requestid.Get(c)
 		if reqID == "" {
-			select {
-			case reqID = <-uuidPool:
-			default:
-				// Fallback jika semua worker uuid sibuk dan antrean pool kosong
-				reqID = uuid.New().String()
-			}
+			reqID = uuid.NewString()
 		}
-
-		log.Debug().
-			Str("generated_trace_id", reqID).
-			Str("path", c.Request.URL.Path).
-			Msg("Trace ID generated for request")
 
 		requestLogger := log.With().
 			Str("trace_id", reqID).
@@ -142,12 +135,16 @@ func main() {
 	})
 
 	apiGroup := r.Group("/")
-	apiGroup.Use(middleware.RateLimiter())
+	if !isTestEnv {
+		apiGroup.Use(middleware.RateLimiter())
+	}
 	{
 		apiGroup.POST("/transactions", txHandler.Create)
 		apiGroup.GET("/transactions/:txId", txHandler.GetByTxID)
 		apiGroup.GET("/users/:id/balance", txHandler.GetUserBalance)
 		apiGroup.GET("/users/:id/transactions", txHandler.GetUserTransactions)
+		apiGroup.GET("/accounts/:accountNo/balance", txHandler.GetAccountBalance)
+		apiGroup.GET("/accounts/:accountNo/transactions", txHandler.GetAccountTransactions)
 	}
 
 	r.GET("/health", func(c *gin.Context) {
@@ -156,6 +153,27 @@ func main() {
 		components := make(map[string]string)
 		overallStatus := "healthy"
 		var errMsg string
+
+		// PgBouncer health check — one-shot connection, tests the pooler itself
+		pgbCtx, pgbCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer pgbCancel()
+		pgbConn, pgbErr := pgx.Connect(pgbCtx, fmt.Sprintf(
+			"postgres://%s:%s@%s/capstone?sslmode=disable",
+			config.AppConfig.PostgresUser,
+			config.AppConfig.PostgresPassword,
+			config.AppConfig.PgBouncerAddr,
+		))
+		if pgbErr != nil {
+			components["pgbouncer"] = "down"
+			overallStatus = "unhealthy"
+			errMsg += fmt.Sprintf("PgBouncer down: %v; ", pgbErr)
+			logger.Warn().Err(pgbErr).Msg("Health check: PgBouncer down")
+		} else {
+			components["pgbouncer"] = "up"
+			if err := pgbConn.Close(pgbCtx); err != nil {
+                logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
+            }
+		}
 
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer pgCancel()

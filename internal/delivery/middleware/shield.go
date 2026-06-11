@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/capstone-b4/capstone-go/internal/pkg/response"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/gin-gonic/gin"
 )
 
@@ -11,6 +12,10 @@ import (
 var ddosSemaphore chan struct{}
 
 func InitDDosShield(maxConcurrent int) {
+	if maxConcurrent <= 0 {
+		ddosSemaphore = nil
+		return
+	}
 	ddosSemaphore = make(chan struct{}, maxConcurrent)
 }
 
@@ -23,7 +28,6 @@ func DDosShield() gin.HandlerFunc {
 
 		select {
 		case ddosSemaphore <- struct{}{}:
-			// Berhasil masuk ke dalam pool kapasitas
 			defer func() { <-ddosSemaphore }()
 			c.Next()
 		default:
@@ -33,6 +37,15 @@ func DDosShield() gin.HandlerFunc {
 				response.ErrServiceUnavailable,
 				"Sistem sedang menghadapi traffic tinggi, silakan coba beberapa saat lagi.",
 				"ddos-shield concurrent limit reached")
+			path := c.FullPath()
+			if path == "" {
+				path = "unknown"
+			}
+			observability.RequestsRejectedTotal.WithLabelValues("shield", path).Inc()
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error":   "Service Unavailable",
+				"message": "Sistem sedang menghadapi traffic tinggi, silakan coba beberapa saat lagi.",
+			})
 			return
 		}
 	}

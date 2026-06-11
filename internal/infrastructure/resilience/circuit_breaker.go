@@ -2,7 +2,9 @@ package resilience
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -50,6 +52,11 @@ var (
 		Interval:    0,
 		IsSuccessful: func(err error) bool {
 			if err == nil {
+				return true
+			}
+			// pgxpool handles reconnect on EOF automatically; tripping the breaker here
+			// would cause unnecessary open-state during PgBouncer idle timeout cycling.
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return true
 			}
 			errMsg := err.Error()

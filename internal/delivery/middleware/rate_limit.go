@@ -9,6 +9,7 @@ import (
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/cache"
 	"github.com/capstone-b4/capstone-go/internal/infrastructure/logging"
 	"github.com/capstone-b4/capstone-go/internal/pkg/response"
+	"github.com/capstone-b4/capstone-go/internal/infrastructure/observability"
 	"github.com/gin-gonic/gin"
 )
 
@@ -48,11 +49,17 @@ func RateLimiter() gin.HandlerFunc {
 		c.Header("X-RateLimit-Window", strconv.Itoa(windowSec))
 
 		if count > limit {
+			path := c.FullPath()
+			if path == "" {
+				path = "unknown"
+			}
+			observability.RequestsRejectedTotal.WithLabelValues("rate_limit", path).Inc()
+
 			logger.Warn().
 				Int("count", count).
 				Int("limit", limit).
 				Str("identifier", identifier).
-				Str("path", c.FullPath()).
+				Str("path", path).
 				Msg("Rate limit exceeded")
 
 			detail := "retry_after=" + strconv.Itoa(ttlSeconds) + "s; identifier=" + identifier

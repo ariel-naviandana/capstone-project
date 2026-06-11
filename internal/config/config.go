@@ -7,6 +7,11 @@ import (
 )
 
 type Config struct {
+	// APP_ENV gates protective middleware. "test" / "perf" disables the
+	// rate limiter and DDoS shield so k6 can drive real load against the
+	// app. Anything else (default "prod") keeps protections active.
+
+	AppEnv     string `mapstructure:"APP_ENV"`
 	ServerPort string `mapstructure:"SERVER_PORT"`
 
 	PostgresHost     string `mapstructure:"POSTGRES_HOST"`
@@ -27,11 +32,22 @@ type Config struct {
 
 	RateLimitRequests int `mapstructure:"RATE_LIMIT_REQUESTS"`
 	RateLimitWindow   int `mapstructure:"RATE_LIMIT_WINDOW"`
+	ShieldMaxInflight int `mapstructure:"SHIELD_MAX_INFLIGHT"`
+
+	PgBouncerAddr       string `mapstructure:"PGBOUNCER_ADDR"`
+	PgBouncerAdminAddr  string `mapstructure:"PGBOUNCER_ADMIN_ADDR"`
+	PostgresReplicaHost string `mapstructure:"POSTGRES_REPLICA_HOST"`
+	PostgresReplicaPort string `mapstructure:"POSTGRES_REPLICA_PORT"`
 
 	JWTSecret     string `mapstructure:"JWT_SECRET"`
 	JWTExpiryHour int    `mapstructure:"JWT_EXPIRY_HOUR"`
 
 	LogInfo bool `mapstructure:"LOG_INFO"`
+}
+
+// IsTestEnv reports whether protective middleware should be skipped (for k6 / perf runs).
+func (c Config) IsTestEnv() bool {
+	return c.AppEnv == "test" || c.AppEnv == "perf"
 }
 
 var AppConfig Config
@@ -46,12 +62,19 @@ func LoadConfig() {
 	viper.AutomaticEnv()
 
 	// Set Default Values
+	viper.SetDefault("APP_ENV", "prod")
+	viper.SetDefault("APP_ENV", "prod")
 	viper.SetDefault("SERVER_PORT", "8000")
 	viper.SetDefault("RATE_LIMIT_REQUESTS", 25000)
 	viper.SetDefault("RATE_LIMIT_WINDOW", 60)
 	viper.SetDefault("JWT_EXPIRY_HOUR", 24)
+	viper.SetDefault("SHIELD_MAX_INFLIGHT", 100)
 
 	// Bind Environment Variables for Viper Unmarshal
+	_ = viper.BindEnv("APP_ENV")
+	_ = viper.BindEnv("SHIELD_MAX_INFLIGHT")
+	_ = viper.BindEnv("APP_ENV")
+	_ = viper.BindEnv("SHIELD_MAX_INFLIGHT")
 	_ = viper.BindEnv("POSTGRES_HOST")
 	_ = viper.BindEnv("POSTGRES_PORT")
 	_ = viper.BindEnv("POSTGRES_USER")
@@ -67,6 +90,11 @@ func LoadConfig() {
 	_ = viper.BindEnv("JWT_SECRET")
 	_ = viper.BindEnv("JWT_EXPIRY_HOUR")
 	_ = viper.BindEnv("LOG_INFO")
+
+	_ = viper.BindEnv("PGBOUNCER_ADDR")
+	_ = viper.BindEnv("PGBOUNCER_ADMIN_ADDR")
+	_ = viper.BindEnv("POSTGRES_REPLICA_HOST")
+	_ = viper.BindEnv("POSTGRES_REPLICA_PORT")
 
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		log.Fatal().Err(err).Msg("Config unmarshal error")

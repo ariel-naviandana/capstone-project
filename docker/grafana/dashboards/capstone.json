@@ -16,6 +16,7 @@
     ]
   },
   "editable": true,
+  "refresh": "5s",
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 1,
@@ -25,7 +26,7 @@
       "datasource": {
         "default": true,
         "type": "prometheus",
-        "uid": "dffk6wxbsne9sd"
+        "uid": "prometheus"
       },
       "description": "",
       "fieldConfig": {
@@ -106,11 +107,11 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "dffk6wxbsne9sd"
+            "uid": "prometheus"
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "rate(http_requests_total[5m])",
+          "expr": "rate(http_requests_total[1m])",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -127,7 +128,7 @@
       "datasource": {
         "default": true,
         "type": "prometheus",
-        "uid": "dffk6wxbsne9sd"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -208,10 +209,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "dffk6wxbsne9sd"
+            "uid": "prometheus"
           },
           "editorMode": "builder",
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -225,7 +226,7 @@
       "datasource": {
         "default": true,
         "type": "prometheus",
-        "uid": "dffk6wxbsne9sd"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -306,10 +307,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "dffk6wxbsne9sd"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))",
+          "expr": "rate(cache_hits_total[1m]) / (rate(cache_hits_total[1m]) + rate(cache_misses_total[1m]))",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -323,7 +324,7 @@
       "datasource": {
         "default": true,
         "type": "prometheus",
-        "uid": "dffk6wxbsne9sd"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -404,10 +405,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "dffk6wxbsne9sd"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(http_requests_total{status=~\"5..\"}[5m]) / rate(http_requests_total[5m])",
+          "expr": "rate(http_requests_total{status=~\"5..\"}[1m]) / rate(http_requests_total[1m])",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -421,7 +422,7 @@
       "datasource": {
         "default": true,
         "type": "prometheus",
-        "uid": "dffk6wxbsne9sd"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -501,7 +502,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "dffk6wxbsne9sd"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "breaker_state",
@@ -518,7 +519,7 @@
       "datasource": {
         "default": true,
         "type": "prometheus",
-        "uid": "dffk6wxbsne9sd"
+        "uid": "prometheus"
       },
       "fieldConfig": {
         "defaults": {
@@ -598,7 +599,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "dffk6wxbsne9sd"
+            "uid": "prometheus"
           },
           "editorMode": "code",
           "expr": "breaker_trips_total",
@@ -610,6 +611,296 @@
       ],
       "title": "Breaker Trips Count",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "default": true,
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Per-second rate of requests rejected before reaching business logic, broken down by which guard fired (rate_limit / shield / breaker).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason) (rate(requests_rejected_total[1m]))",
+          "instant": false,
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rejected Requests by Reason (req/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "default": true,
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "HTTP responses per second grouped by status code. 200/202 = success, 429 = rate-limited, 503 = shield or breaker, 5xx = real errors.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "reqps"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "^2.." },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "429" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "503" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (status) (rate(http_requests_total[1m]))",
+          "instant": false,
+          "legendFormat": "{{status}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP Status Code Distribution (req/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "default": true,
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Share of incoming traffic that is being rejected by each guard. If shield is high, raise SHIELD_MAX_INFLIGHT or scale the API. If rate_limit is high, raise RATE_LIMIT_REQUESTS or fix the keying header. If breaker is high, the downstream (Kafka/Postgres) is sick.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.05 },
+              { "color": "red", "value": 0.2 }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "max"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason) (rate(requests_rejected_total[1m])) / ignoring(reason) group_left sum(rate(http_requests_total[1m]))",
+          "instant": false,
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rejection Rate by Reason (% of total traffic)",
+      "type": "timeseries"
     }
   ],
   "schemaVersion": 39,
@@ -618,7 +909,7 @@
     "list": []
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {},
