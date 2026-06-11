@@ -1,3 +1,7 @@
+package domain
+
+import "context"
+
 type TransactionRepository interface {
 	Create(ctx context.Context, tx *TransactionCreate) (string, error)
 	GetByTxID(ctx context.Context, txID string) (*TransactionDetail, error)
