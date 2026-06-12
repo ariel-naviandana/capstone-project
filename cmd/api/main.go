@@ -160,8 +160,8 @@ func main() {
 		} else {
 			components["pgbouncer"] = "up"
 			if err := pgbConn.Close(pgbCtx); err != nil {
-                logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
-            }
+				logger.Warn().Err(err).Msg("Health check: failed to close PgBouncer connection")
+			}
 		}
 
 		pgCtx, pgCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -188,11 +188,20 @@ func main() {
 
 		redisCtx, redisCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer redisCancel()
-		if _, err := cache.RedisClient.Ping(redisCtx).Result(); err != nil {
+		if cache.RedisClient == nil {
 			components["redis"] = "down"
-			overallStatus = "unhealthy"
+			if overallStatus == "healthy" {
+				overallStatus = "degraded"
+			}
+			errMsg += "Redis down: cache bypass active; "
+			logger.Warn().Msg("Health check: Redis down, cache bypass active")
+		} else if _, err := cache.RedisClient.Ping(redisCtx).Result(); err != nil {
+			components["redis"] = "down"
+			if overallStatus == "healthy" {
+				overallStatus = "degraded"
+			}
 			errMsg += fmt.Sprintf("Redis down: %v; ", err)
-			logger.Warn().Err(err).Msg("Health check: Redis down")
+			logger.Warn().Err(err).Msg("Health check: Redis down, cache bypass active")
 		} else {
 			components["redis"] = "up"
 		}
