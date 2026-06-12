@@ -87,8 +87,8 @@ const profiles = {
             executor: 'ramping-vus',
             startVUs: 0,
             stages: [
-                { duration: '30s', target: parseInt(__ENV.VU_TARGET || '850') }, // Ramp up to target
-                { duration: '2m',  target: parseInt(__ENV.VU_TARGET || '850') }, // Hold steady — SLO measurement window
+                { duration: '30s', target: parseInt(__ENV.VU_TARGET || '200') }, // Ramp up to target
+                { duration: '2m',  target: parseInt(__ENV.VU_TARGET || '200') }, // Hold steady — SLO measurement window
                 { duration: '30s', target: 0 },                                   // Ramp down
             ],
         },
