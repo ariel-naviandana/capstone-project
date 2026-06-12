@@ -4,6 +4,7 @@ metadata:
   name: bankx-config
 data:
   SERVER_PORT: "8000"
+  APP_ENV: "perf"
   LOG_LEVEL: "info"
   # Direct Postgres details (fallback jika PGBOUNCER_ADDR dikosongkan)
   POSTGRES_HOST: "postgres"
@@ -12,7 +13,7 @@ data:
   REDIS_ADDR: "host.minikube.internal:6379"
   REDIS_DB: "0"
   KAFKA_BROKERS: "host.minikube.internal:9092"
-  MONGO_URI: "mongodb://admin:capstone123@host.minikube.internal:27017"
+  MONGO_URI: "mongodb://mongo:capstone123@host.minikube.internal:27017/capstone?authSource=admin"
   KAFKA_TOPIC: "transactions"
   KAFKA_GROUP_ID: "worker-group"
   RATE_LIMIT_REQUESTS: "100"
