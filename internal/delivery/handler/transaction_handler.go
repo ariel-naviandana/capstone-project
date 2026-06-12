@@ -60,7 +60,7 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	// transaction. Empty ref_no means the client is opting out of dedup.
 	idemClaimed := false
 	idemKey := ""
-	if input.RefNo != "" {
+	if input.RefNo != "" && cache.RedisClient != nil {
 		idemKey = "idem:tx:" + input.RefNo
 		// SetArgs with Mode "NX" replaces deprecated SetNX. On miss (key
 		// already set), Redis replies nil and the client surfaces redis.Nil.
@@ -85,6 +85,8 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 		default:
 			logger.Warn().Err(claimErr).Str("ref_no", input.RefNo).Msg("Idempotency SET NX failed; proceeding without claim")
 		}
+	} else if input.RefNo != "" {
+		logger.Warn().Str("ref_no", input.RefNo).Msg("Redis offline, idempotency cache bypassed")
 	}
 
 	traceID := c.GetString("trace_id")
@@ -99,7 +101,7 @@ func (h *TransactionHandler) Create(c *gin.Context) {
 	if err != nil {
 		// Roll back the idempotency claim so the client can retry without
 		// being told their tx is "already processed" when nothing was queued.
-		if idemClaimed {
+		if idemClaimed && cache.RedisClient != nil {
 			if delErr := cache.RedisClient.Del(c.Request.Context(), idemKey).Err(); delErr != nil {
 				logger.Warn().Err(delErr).Str("ref_no", input.RefNo).Msg("Failed to release idempotency claim after publish failure")
 			}
