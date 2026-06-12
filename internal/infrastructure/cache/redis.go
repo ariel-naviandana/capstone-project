@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 
 var RedisClient *redis.Client
 
+var ErrRedisUnavailable = errors.New("redis unavailable")
+
 // BalanceLayer caches account balances. Hot path for /accounts/:no/balance —
 // L1 sized for ~10k hot accounts; soft TTL 1m so worker write-through stays
 // authoritative; hard TTL 1h tolerates Redis hiccups before falling back to DB.
@@ -25,7 +28,7 @@ var BalanceLayer *Layer[domain.AccountBalance]
 var TxLayer *Layer[domain.TransactionDetail]
 
 func ConnectRedis() {
-	RedisClient = redis.NewClient(&redis.Options{
+	client := redis.NewClient(&redis.Options{
 		Addr:     config.AppConfig.RedisAddr,
 		Password: config.AppConfig.RedisPassword,
 		DB:       config.AppConfig.RedisDB,
@@ -35,14 +38,21 @@ func ConnectRedis() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := RedisClient.Ping(ctx).Result()
+	_, err := client.Ping(ctx).Result()
 	if err != nil {
-		log.Fatal().
+		log.Warn().
 			Err(err).
 			Str("addr", config.AppConfig.RedisAddr).
-			Msg("Gagal connect Redis")
+			Msg("Redis offline, aplikasi berjalan tanpa cache")
+		if closeErr := client.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("Gagal menutup client Redis offline")
+		}
+		RedisClient = nil
+		InitLayers()
+		return
 	}
 
+	RedisClient = client
 	log.Info().
 		Str("addr", config.AppConfig.RedisAddr).
 		Msg("Connected to Redis")
@@ -89,6 +99,11 @@ func CloseRedis() {
 }
 
 func GetCached[T any](ctx context.Context, key string) (*T, bool) {
+	if RedisClient == nil {
+		observability.CacheMissesTotal.WithLabelValues("redis").Inc()
+		return nil, false
+	}
+
 	val, err := RedisClient.Get(ctx, key).Result()
 	if err == redis.Nil {
 		observability.CacheMissesTotal.WithLabelValues("redis").Inc()
@@ -118,6 +133,10 @@ func GetCached[T any](ctx context.Context, key string) (*T, bool) {
 }
 
 func SetCache(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	if RedisClient == nil {
+		return ErrRedisUnavailable
+	}
+
 	data, err := json.Marshal(value)
 	if err != nil {
 		log.Error().
@@ -144,6 +163,10 @@ func SetCache(ctx context.Context, key string, value interface{}, ttl time.Durat
 }
 
 func InvalidateCache(ctx context.Context, key string) error {
+	if RedisClient == nil {
+		return ErrRedisUnavailable
+	}
+
 	err := RedisClient.Del(ctx, key).Err()
 	if err != nil {
 		log.Warn().
@@ -159,6 +182,10 @@ func InvalidateCache(ctx context.Context, key string) error {
 }
 
 func IncrementWithExpiry(ctx context.Context, key string, expiry time.Duration) (int, int, error) {
+	if RedisClient == nil {
+		return 0, 0, ErrRedisUnavailable
+	}
+
 	script := `
 		local current = redis.call("INCR", KEYS[1])
 		if current == 1 then
