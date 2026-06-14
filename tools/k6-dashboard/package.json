@@ -1,0 +1,12 @@
+{
+  "name": "k6-dashboard",
+  "version": "1.0.0",
+  "description": "Live k6 performance testing console for BankX capstone pameran",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
