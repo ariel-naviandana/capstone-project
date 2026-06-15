@@ -23,6 +23,7 @@ coverage.*
 .env.local
 .env.development
 .env.test
+tools/k6-dashboard/node_modules/
 
 
 # IDE / Editor
@@ -41,5 +42,5 @@ Thumbs.db
 
 *.md
 
-*.json
+# *.json
 !summary.json  # (opsional) kecuali kalau ada yang mau kamu simpan

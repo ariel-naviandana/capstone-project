@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>k6 Performance Console — Bank X | Kelompok 9</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet" />
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --white: #ffffff;
+            --ink: #0f1117;
+            --ink-2: #3a3d4a;
+            --ink-3: #6b7080;
+            --rule: #e4e6ed;
+            --surface: #f7f8fc;
+            --blue: #1a56db;
+            --blue-lt: #e8eeff;
+            --blue-mid: #3b6ef5;
+            --green: #0e8a5f;
+            --green-lt: #e4f5ee;
+            --amber: #b45309;
+            --amber-lt: #fef3c7;
+            --red: #b42318;
+            --red-lt: #fdeceb;
+            --mono: 'JetBrains Mono', monospace;
+            --sans: 'Inter', sans-serif;
+            --display: 'Inter Tight', sans-serif;
+        }
+
+        body {
+            font-family: var(--sans);
+            color: var(--ink);
+            background: var(--white);
+            line-height: 1.6;
+            font-size: 16px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── NAV ── */
+        nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--rule);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+            height: 56px;
+        }
+
+        .nav-brand {
+            font-family: var(--mono);
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--blue);
+            letter-spacing: 0.02em;
+        }
+
+        .nav-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--ink-3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            box-shadow: 0 0 0 3px var(--green-lt);
+        }
+
+        .status-dot.running {
+            background: var(--amber);
+            box-shadow: 0 0 0 3px var(--amber-lt);
+            animation: pulse 1.4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.35;
+            }
+        }
+
+        /* ── HERO ── */
+        .hero {
+            padding: 4rem 2rem 3rem;
+            max-width: 980px;
+            margin: 0 auto;
+        }
+
+        .hero-eyebrow {
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--blue);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+
+        .hero h1 {
+            font-family: var(--display);
+            font-size: clamp(1.75rem, 3.5vw, 2.6rem);
+            font-weight: 800;
+            line-height: 1.15;
+            color: var(--ink);
+            margin-bottom: 0.9rem;
+        }
+
+        .hero h1 span {
+            color: var(--blue-mid);
+        }
+
+        .hero-desc {
+            font-size: 15px;
+            color: var(--ink-2);
+            max-width: 620px;
+            line-height: 1.7;
+        }
+
+        /* ── LAYOUT ── */
+        .layout {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 0 2rem 4rem;
+            display: grid;
+            grid-template-columns: 340px 1fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        .section-label {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--blue);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+
+        /* ── SCENARIO LIST ── */
+        .scenario-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .scenario-card {
+            background: var(--white);
+            border: 1px solid var(--rule);
+            border-radius: 10px;
+            padding: 1.1rem 1.25rem;
+            cursor: pointer;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+
+        .scenario-card:hover {
+            border-color: var(--blue);
+            box-shadow: 0 4px 16px rgba(26, 86, 219, 0.08);
+        }
+
+        .scenario-card.active {
+            border-color: var(--blue);
+            background: var(--blue-lt);
+        }
+
+        .scenario-card.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .scenario-top {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-bottom: 0.35rem;
+        }
+
+        .scenario-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .scenario-duration {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--ink-3);
+        }
+
+        .scenario-desc {
+            font-size: 12.5px;
+            color: var(--ink-3);
+            line-height: 1.55;
+        }
+
+        .scenario-running-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--amber);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-top: 0.5rem;
+        }
+
+        .vu-input-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 0.6rem;
+            padding-top: 0.6rem;
+            border-top: 1px solid var(--rule);
+        }
+
+        .vu-input-row label {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--ink-3);
+        }
+
+        .vu-input-row input {
+            width: 70px;
+            font-family: var(--mono);
+            font-size: 12px;
+            padding: 0.25rem 0.5rem;
+            border: 1px solid var(--rule);
+            border-radius: 5px;
+            background: var(--white);
+        }
+
+        .vu-input-row input:focus {
+            outline: none;
+            border-color: var(--blue);
+        }
+
+        /* ── CONSOLE ── */
+        .console-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .console-box {
+            border: 1px solid var(--rule);
+            border-radius: 12px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .console-bar {
+            background: var(--surface);
+            border-bottom: 1px solid var(--rule);
+            padding: 0.7rem 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+        }
+
+        .console-bar-left {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .dot-r {
+            background: #ff5f57;
+        }
+
+        .dot-y {
+            background: #ffbd2e;
+        }
+
+        .dot-g {
+            background: #27c93f;
+        }
+
+        .console-title {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--ink-3);
+            margin-left: 0.5rem;
+        }
+
+        .console-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .icon-btn {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            padding: 0.3rem 0.7rem;
+            border-radius: 5px;
+            border: 1.5px solid var(--rule);
+            background: var(--white);
+            color: var(--ink-2);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .icon-btn:hover {
+            border-color: var(--blue);
+            color: var(--blue);
+        }
+
+        .icon-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .icon-btn.stop {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .icon-btn.stop:hover {
+            background: var(--red-lt);
+        }
+
+        .console-body {
+            background: var(--ink);
+            color: #d6d9e4;
+            font-family: var(--mono);
+            font-size: 12.5px;
+            line-height: 1.65;
+            padding: 1.25rem;
+            height: 480px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .console-idle {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            color: #6b7280;
+            text-align: center;
+        }
+
+        .console-idle-icon {
+            font-size: 1.75rem;
+            opacity: 0.5;
+        }
+
+        .console-idle-text {
+            font-size: 13px;
+        }
+
+        .log-line {
+            display: block;
+        }
+
+        .log-line.status {
+            color: #7aa2ff;
+        }
+
+        .log-line.done {
+            color: #4ade80;
+            font-weight: 600;
+        }
+
+        .log-line.error {
+            color: #f87171;
+            font-weight: 600;
+        }
+
+        /* k6 highlight */
+        .k6-pass {
+            color: #4ade80;
+        }
+
+        .k6-fail {
+            color: #f87171;
+        }
+
+        .k6-metric {
+            color: #c4b5fd;
+        }
+
+        /* ── RUN BUTTON BAR ── */
+        .run-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .run-bar-info {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--ink-3);
+        }
+
+        .run-bar-info strong {
+            color: var(--ink);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.6rem 1.5rem;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.15s;
+            cursor: pointer;
+            border: none;
+            font-family: var(--sans);
+        }
+
+        .btn-primary {
+            background: var(--blue);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #1445b8;
+        }
+
+        .btn-primary:disabled {
+            background: var(--rule);
+            color: var(--ink-3);
+            cursor: not-allowed;
+        }
+
+        .spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── SLO STRIP ── */
+        .slo-strip {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            background: var(--surface);
+            border: 1px solid var(--rule);
+            border-radius: 10px;
+            padding: 0.9rem 1.1rem;
+        }
+
+        .slo-item {
+            display: flex;
+            align-items: baseline;
+            gap: 0.4rem;
+            font-family: var(--mono);
+            font-size: 12px;
+        }
+
+        .slo-item .key {
+            color: var(--ink-3);
+        }
+
+        .slo-item .val {
+            color: var(--ink);
+            font-weight: 600;
+        }
+
+        /* ── RESPONSIVE ── */
+        @media (max-width: 800px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            nav {
+                padding: 0 1.25rem;
+            }
+
+            .hero {
+                padding: 2.5rem 1.25rem 2rem;
+            }
+
+            .layout {
+                padding: 0 1.25rem 3rem;
+            }
+
+            .console-body {
+                height: 360px;
+            }
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3a3d4a;
+            border-radius: 99px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav>
+        <span class="nav-brand">Kelompok 9 · k6 Performance Console</span>
+        <div class="nav-status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusLabel">Idle</span>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <p class="hero-eyebrow">Live Testing · Pameran Capstone</p>
+        <h1>Jalankan <span>Performance Test k6</span> Langsung dari Browser</h1>
+        <p class="hero-desc">
+            Pilih salah satu skenario pengujian beban, lalu klik Run. Output k6 akan tampil secara real-time di console
+            sebelah kanan — cocok untuk demo langsung di booth pameran.
+        </p>
+    </section>
+
+    <div class="layout">
+
+        <!-- LEFT: scenario list -->
+        <div>
+            <p class="section-label">Skenario Pengujian</p>
+            <div class="scenario-list" id="scenarioList"></div>
+        </div>
+
+        <!-- RIGHT: console -->
+        <div class="console-wrap">
+
+            <div class="run-bar">
+                <div class="run-bar-info">
+                    Skenario terpilih: <strong id="selectedLabel">—</strong>
+                </div>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="icon-btn stop" id="stopBtn" onclick="stopTest()" disabled>■ Stop</button>
+                    <button class="btn btn-primary" id="runBtn" onclick="runSelected()" disabled>
+                        <span id="runBtnText">▶ Run Test</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="console-box">
+                <div class="console-bar">
+                    <div class="console-bar-left">
+                        <span class="dot dot-r"></span>
+                        <span class="dot dot-y"></span>
+                        <span class="dot dot-g"></span>
+                        <span class="console-title" id="consoleTitle">k6 output</span>
+                    </div>
+                    <div class="console-actions">
+                        <button class="icon-btn" onclick="clearConsole()">Clear</button>
+                    </div>
+                </div>
+                <div class="console-body" id="consoleBody">
+                    <div class="console-idle" id="consoleIdle">
+                        <div class="console-idle-icon">▣</div>
+                        <div class="console-idle-text">Pilih skenario di sebelah kiri, lalu klik Run Test.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="slo-strip">
+                <div class="slo-item"><span class="key">p95 latency</span><span class="val">&lt; 500ms</span></div>
+                <div class="slo-item"><span class="key">tx_latency p95</span><span class="val">&lt; 500ms</span></div>
+                <div class="slo-item"><span class="key">balance_latency p95</span><span class="val">&lt; 300ms</span>
+                </div>
+                <div class="slo-item"><span class="key">error rate</span><span class="val">&lt; 1%</span></div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const SCENARIOS = {
+            smoke: {
+                label: "Smoke Test",
+                duration: "1 menit · 5 VU",
+                desc: "Validasi sistem berjalan normal di beban minimal sebelum test berat dijalankan.",
+            },
+            load: {
+                label: "Load Test",
+                duration: "6 menit · ramp ke 500 VU",
+                desc: "Beban normal steady-state. Mengukur performa sistem pada kondisi traffic wajar.",
+            },
+            stress: {
+                label: "Stress Test",
+                duration: "13 menit · 1.000 → 3.000 VU",
+                desc: "Dorong sistem ke titik batas secara bertahap. Amati kapan circuit breaker mulai aktif.",
+            },
+            spike: {
+                label: "Spike Test",
+                duration: "~1m20s · lonjakan ke 1.500 VU",
+                desc: "Simulasi lonjakan traffic mendadak (flash sale) — naik instan, tahan sebentar, lalu drop.",
+            },
+            soak: {
+                label: "Soak Test",
+                duration: "~2 jam · 400 VU konstan",
+                desc: "Uji ketahanan jangka panjang — deteksi memory leak atau resource exhaustion.",
+                long: true,
+            },
+            load_slo: {
+                label: "Load SLO (Sweet Spot)",
+                duration: "3 menit · VU custom",
+                desc: "Cari kapasitas maksimal sistem yang masih memenuhi SLO menggunakan binary search VU.",
+                extraEnv: true,
+            },
+        };
+
+        let selectedScenario = null;
+        let activeSSE = null;
+        let isRunning = false;
+
+        function renderScenarios() {
+            const list = document.getElementById("scenarioList");
+            Object.entries(SCENARIOS).forEach(([id, s]) => {
+                const card = document.createElement("div");
+                card.className = "scenario-card";
+                card.id = `card-${id}`;
+                card.onclick = (e) => {
+                    if (e.target.tagName === "INPUT") return;
+                    selectScenario(id);
+                };
+
+                let extra = "";
+                if (s.extraEnv) {
+                    extra = `
+        <div class="vu-input-row">
+          <label for="vu-${id}">VU_TARGET</label>
+          <input type="number" id="vu-${id}" value="200" min="1" max="5000" />
+        </div>`;
+                }
+
+                card.innerHTML = `
+      <div class="scenario-top">
+        <span class="scenario-name">${s.label}</span>
+        <span class="scenario-duration">${s.duration}</span>
+      </div>
+      <div class="scenario-desc">${s.desc}</div>
+      ${extra}
+      <div class="scenario-running-tag" id="tag-${id}" style="display:none">● Running</div>
+    `;
+                list.appendChild(card);
+            });
+        }
+
+        function selectScenario(id) {
+            if (isRunning) return;
+            selectedScenario = id;
+            document.querySelectorAll(".scenario-card").forEach(c => c.classList.remove("active"));
+            document.getElementById(`card-${id}`).classList.add("active");
+            document.getElementById("selectedLabel").textContent = SCENARIOS[id].label;
+            document.getElementById("runBtn").disabled = false;
+            document.getElementById("consoleTitle").textContent = `k6 — ${SCENARIOS[id].label}`;
+        }
+
+        function clearConsole() {
+            const body = document.getElementById("consoleBody");
+            body.innerHTML = `<div class="console-idle">
+    <div class="console-idle-icon">▣</div>
+    <div class="console-idle-text">Console dibersihkan.</div>
+  </div>`;
+        }
+
+        function appendLine(type, text) {
+            const idle = document.querySelector("#consoleBody .console-idle");
+            if (idle) idle.remove();
+
+            const body = document.getElementById("consoleBody");
+            const line = document.createElement("span");
+            line.className = `log-line ${type}`;
+
+            let colored = text
+                .replace(/✓/g, '<span class="k6-pass">✓</span>')
+                .replace(/✗/g, '<span class="k6-fail">✗</span>')
+                .replace(/(http_req_duration|tx_latency|balance_latency|errors|vus\b|iterations)/g, '<span class="k6-metric">$1</span>');
+
+            line.innerHTML = colored + "\n";
+            body.appendChild(line);
+            body.scrollTop = body.scrollHeight;
+        }
+
+        function setRunning(running) {
+            isRunning = running;
+            const dot = document.getElementById("statusDot");
+            const label = document.getElementById("statusLabel");
+            const runBtn = document.getElementById("runBtn");
+            const stopBtn = document.getElementById("stopBtn");
+
+            if (running) {
+                dot.classList.add("running");
+                label.textContent = "Running";
+                runBtn.disabled = true;
+                stopBtn.disabled = false;
+                document.getElementById("runBtnText").innerHTML = `<span class="spinner"></span> Running...`;
+                if (selectedScenario) document.getElementById(`tag-${selectedScenario}`).style.display = "inline-flex";
+                document.querySelectorAll(".scenario-card").forEach(c => {
+                    if (c.id !== `card-${selectedScenario}`) c.classList.add("disabled");
+                });
+            } else {
+                dot.classList.remove("running");
+                label.textContent = "Idle";
+                runBtn.disabled = !selectedScenario;
+                stopBtn.disabled = true;
+                document.getElementById("runBtnText").textContent = "▶ Run Test";
+                document.querySelectorAll(".scenario-running-tag").forEach(t => t.style.display = "none");
+                document.querySelectorAll(".scenario-card").forEach(c => c.classList.remove("disabled"));
+            }
+        }
+
+        function runSelected() {
+            if (!selectedScenario || isRunning) return;
+
+            clearConsole();
+            setRunning(true);
+
+            let url = `/run/${selectedScenario}`;
+            const s = SCENARIOS[selectedScenario];
+            if (s.extraEnv) {
+                const vu = document.getElementById(`vu-${selectedScenario}`).value || 200;
+                url += `?vu=${vu}`;
+            }
+
+            const sse = new EventSource(url);
+            activeSSE = sse;
+
+            sse.onmessage = (e) => {
+                const { type, data } = JSON.parse(e.data);
+                appendLine(type, data);
+
+                if (type === "done" || type === "error") {
+                    sse.close();
+                    activeSSE = null;
+                    setRunning(false);
+                }
+            };
+
+            sse.onerror = () => {
+                appendLine("error", "[koneksi terputus]");
+                sse.close();
+                activeSSE = null;
+                setRunning(false);
+            };
+        }
+
+        function stopTest() {
+            if (activeSSE) {
+                activeSSE.close();
+                activeSSE = null;
+            }
+            fetch("/stop", { method: "POST" }).catch(() => { });
+            appendLine("error", "[dihentikan oleh pengguna]");
+            setRunning(false);
+        }
+
+        renderScenarios();
+    </script>
+</body>
+
+</html>
